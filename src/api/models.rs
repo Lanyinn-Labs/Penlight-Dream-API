@@ -2,8 +2,129 @@
 //! Field shapes mirror GarupaSpeedTracker's `RankingUserRaw` and the
 //! `MonthlyRankingBandoriRaw` and `EventRankingBandoriRaw` reports.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 use serde_json::Value;
+
+// ============================================================================
+// Skill master
+// ============================================================================
+
+/// A localized string. Only JP is populated because this service currently
+/// talks exclusively to the Japanese game server; the object shape leaves room
+/// for additional server locales without changing the response field type.
+#[derive(Debug, Clone, Serialize)]
+pub struct LocalizedString {
+    pub jp: String,
+}
+
+/// One level of a normalized skill. The upstream skill master calls the
+/// duration-like float `effectValue`; the normalized view exposes that value
+/// under its gameplay meaning while keeping the original raw endpoint intact.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillLevelInfo {
+    pub skill_level: i64,
+    pub duration: Option<f64>,
+    pub description: LocalizedString,
+}
+
+/// A skill grouped across all of its levels.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillInfo {
+    pub skill_id: i64,
+    pub skill_type: String,
+    pub simple_description: LocalizedString,
+    pub levels: Vec<SkillLevelInfo>,
+}
+
+#[derive(Debug, Clone)]
+struct SkillLevelCandidate {
+    skill_level: i64,
+    duration: Option<f64>,
+    skill_name: String,
+    description: String,
+    skill_type: String,
+}
+
+/// Converts the game's flat `(skillId, skillLevel)` rows into a deterministic
+/// normalized list. Invalid identifiers are ignored and a duplicate level uses
+/// the last upstream row, matching protobuf decoding's last-value-wins behavior
+/// for singular fields.
+pub fn skill_list(root: &Value) -> Vec<SkillInfo> {
+    let mut grouped: BTreeMap<i64, BTreeMap<i64, SkillLevelCandidate>> = BTreeMap::new();
+
+    let Some(entries) = root.get("entries").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    for entry in entries {
+        let Some(skill_id) = entry
+            .get("skillId")
+            .and_then(Value::as_i64)
+            .filter(|id| *id > 0)
+        else {
+            continue;
+        };
+        let Some(skill_level) = entry
+            .get("skillLevel")
+            .and_then(Value::as_i64)
+            .filter(|level| *level > 0)
+        else {
+            continue;
+        };
+
+        let candidate = SkillLevelCandidate {
+            skill_level,
+            duration: entry.get("effectValue").and_then(Value::as_f64),
+            skill_name: str_of(entry, "skillName"),
+            description: str_of(entry, "description"),
+            skill_type: str_of(entry, "skillType"),
+        };
+        grouped
+            .entry(skill_id)
+            .or_default()
+            .insert(skill_level, candidate);
+    }
+
+    grouped
+        .into_iter()
+        .map(|(skill_id, levels)| {
+            // The highest level is the closest equivalent to Bestdori's
+            // simpleDescription. Fall back through lower levels if a string is
+            // absent in an incomplete upstream row.
+            let skill_type = levels
+                .values()
+                .rev()
+                .find(|level| !level.skill_type.is_empty())
+                .map(|level| level.skill_type.clone())
+                .unwrap_or_default();
+            let simple_description = levels
+                .values()
+                .rev()
+                .find(|level| !level.skill_name.is_empty())
+                .map(|level| level.skill_name.clone())
+                .unwrap_or_default();
+            let levels = levels
+                .into_values()
+                .map(|level| SkillLevelInfo {
+                    skill_level: level.skill_level,
+                    duration: level.duration,
+                    description: LocalizedString { jp: level.description },
+                })
+                .collect();
+
+            SkillInfo {
+                skill_id,
+                skill_type,
+                simple_description: LocalizedString { jp: simple_description },
+                levels,
+            }
+        })
+        .collect()
+}
 
 // ============================================================================
 // Ranking user
@@ -393,4 +514,143 @@ fn parse_ranking_rewards(arr: &[Value]) -> Vec<EventRankingReward> {
             recommend_flg: r.get("recommendFlg").and_then(Value::as_bool).unwrap_or(false),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn skill_list_groups_and_sorts_skills_and_levels() {
+        let root = json!({
+            "entries": [
+                {
+                    "skillId": 2,
+                    "skillLevel": 2,
+                    "effectValue": 5.5,
+                    "skillName": "技能二 Lv2",
+                    "description": "5.5秒間 効果二",
+                    "skillType": "score"
+                },
+                {
+                    "skillId": 1,
+                    "skillLevel": 2,
+                    "effectValue": 6.0,
+                    "skillName": "技能一 Lv2",
+                    "description": "6秒間 効果一",
+                    "skillType": "judge"
+                },
+                {
+                    "skillId": 1,
+                    "skillLevel": 1,
+                    "effectValue": 5.0,
+                    "skillName": "技能一 Lv1",
+                    "description": "5秒間 効果一",
+                    "skillType": "judge"
+                }
+            ]
+        });
+
+        let value = serde_json::to_value(skill_list(&root)).unwrap();
+        assert_eq!(
+            value,
+            json!([
+                {
+                    "skillId": 1,
+                    "skillType": "judge",
+                    "simpleDescription": { "jp": "技能一 Lv2" },
+                    "levels": [
+                        {
+                            "skillLevel": 1,
+                            "duration": 5.0,
+                            "description": { "jp": "5秒間 効果一" }
+                        },
+                        {
+                            "skillLevel": 2,
+                            "duration": 6.0,
+                            "description": { "jp": "6秒間 効果一" }
+                        }
+                    ]
+                },
+                {
+                    "skillId": 2,
+                    "skillType": "score",
+                    "simpleDescription": { "jp": "技能二 Lv2" },
+                    "levels": [
+                        {
+                            "skillLevel": 2,
+                            "duration": 5.5,
+                            "description": { "jp": "5.5秒間 効果二" }
+                        }
+                    ]
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn skill_list_uses_last_duplicate_level() {
+        let root = json!({
+            "entries": [
+                {
+                    "skillId": 7,
+                    "skillLevel": 1,
+                    "effectValue": 5.0,
+                    "skillName": "旧名称",
+                    "description": "旧描述",
+                    "skillType": "old"
+                },
+                {
+                    "skillId": 7,
+                    "skillLevel": 1,
+                    "effectValue": 7.0,
+                    "skillName": "新名称",
+                    "description": "新描述",
+                    "skillType": "new"
+                }
+            ]
+        });
+
+        let value = serde_json::to_value(skill_list(&root)).unwrap();
+        assert_eq!(value[0]["skillType"], "new");
+        assert_eq!(value[0]["simpleDescription"]["jp"], "新名称");
+        assert_eq!(value[0]["levels"].as_array().unwrap().len(), 1);
+        assert_eq!(value[0]["levels"][0]["duration"], 7.0);
+        assert_eq!(value[0]["levels"][0]["description"]["jp"], "新描述");
+    }
+
+    #[test]
+    fn skill_list_handles_missing_fields_and_rejects_invalid_ids() {
+        let root = json!({
+            "entries": [
+                { "skillId": 3, "skillLevel": 1 },
+                { "skillId": 0, "skillLevel": 1, "effectValue": 99 },
+                { "skillId": 4, "skillLevel": 0, "effectValue": 99 },
+                { "skillLevel": 1, "effectValue": 99 }
+            ]
+        });
+
+        let value = serde_json::to_value(skill_list(&root)).unwrap();
+        assert_eq!(
+            value,
+            json!([{
+                "skillId": 3,
+                "skillType": "",
+                "simpleDescription": { "jp": "" },
+                "levels": [{
+                    "skillLevel": 1,
+                    "duration": null,
+                    "description": { "jp": "" }
+                }]
+            }])
+        );
+    }
+
+    #[test]
+    fn skill_list_returns_empty_list_for_non_list_payloads() {
+        assert!(skill_list(&json!({})).is_empty());
+        assert!(skill_list(&json!({ "entries": null })).is_empty());
+    }
 }

@@ -44,6 +44,7 @@ curl http://127.0.0.1:8080/api/en/music
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/{server}/monthly-ranking` | 月榜期次主数据 |
+| GET | `/api/{server}/monthly-ranking/{monthly_id}/info` | 单个月榜期次主数据 |
 | GET | `/api/{server}/monthly-ranking/{monthly_id}` | 某期月榜的完整排名 |
 | GET | `/api/{server}/monthly-ranking/{monthly_id}/top` | 仅前列用户 |
 | GET | `/api/{server}/monthly-ranking/{monthly_id}/border` | 仅分档线用户 |
@@ -53,6 +54,7 @@ curl http://127.0.0.1:8080/api/en/music
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/{server}/events` | 活动主数据列表 |
+| GET | `/api/{server}/events/{event_id}` | 单个活动主数据 |
 | GET | `/api/{server}/events/{event_id}/ranking?type=medley` | 某活动排名，`type` 缺省时从活动主数据解析，`mid` 可选用于按曲目子榜 |
 
 ### 主数据
@@ -64,16 +66,67 @@ curl http://127.0.0.1:8080/api/en/music
 | GET | `/api/{server}/music/{music_id}` | 单曲主数据 |
 | GET | `/api/{server}/characters` | 角色主数据，含人物设定、服装季、语音、Live2D 服装 |
 | GET | `/api/{server}/characters/{character_id}` | 单角色主数据 |
+| GET | `/api/{server}/characters/{character_id}/cards` | 角色对应的卡列表 |
+| GET | `/api/{server}/characters/{character_id}/costumes` | 角色对应的服装列表 |
 | GET | `/api/{server}/bands` | 乐队主数据 |
+| GET | `/api/{server}/bands/{band_id}` | 单个乐队主数据 |
+| GET | `/api/{server}/bands/{band_id}/characters` | 乐队成员列表 |
 | GET | `/api/{server}/areas` | 区域主数据 |
+| GET | `/api/{server}/areas/{area_id}` | 单个区域主数据 |
 | GET | `/api/{server}/gacha` | 卡池主数据 |
+| GET | `/api/{server}/gacha/{gacha_id}` | 单个卡池主数据 |
 | GET | `/api/{server}/items` | 道具主数据 |
+| GET | `/api/{server}/items/{item_id}` | 单个道具主数据 |
 | GET | `/api/{server}/skills` | 技能主数据 |
+| GET | `/api/{server}/skills/normalized` | 按技能 ID 聚合的技能等级、日文文本与持续时间 |
+| GET | `/api/{server}/skills/{skill_id}` | 单个规范化技能及全部等级 |
+| GET | `/api/{server}/skills/{skill_id}/cards` | 使用该技能（含第二技能）的卡列表 |
 | GET | `/api/{server}/stamps` | 表情主数据 |
+| GET | `/api/{server}/stamps/{stamp_id}` | 单个表情主数据 |
 | GET | `/api/{server}/login-bonuses` | 登录奖励主数据 |
+| GET | `/api/{server}/login-bonuses/{login_bonus_id}` | 单个登录奖励活动 |
 | GET | `/api/{server}/costumes` | 服装主数据 |
+| GET | `/api/{server}/costumes/{costume_id}` | 单个服装主数据 |
 | GET | `/api/{server}/shops` | 商店主数据 |
+| GET | `/api/{server}/shops/{shop_id}` | 单个商店主数据 |
 | GET | `/api/{server}/cards` | 卡主数据，含各等级能力值、技能引用、`episodes` 卡面剧情与 `training` 特训数据 |
+| GET | `/api/{server}/cards/{card_id}` | 单张卡主数据 |
+
+#### 规范化技能
+
+`GET /api/{server}/skills/normalized` 保留原始 `/skills` 接口不变，将游戏服返回的
+`(skillId, skillLevel)` 平铺记录聚合为以下结构：
+
+```json
+{
+  "entries": [
+    {
+      "skillId": 1,
+      "skillType": "score",
+      "simpleDescription": {
+        "jp": "スコア10%UP"
+      },
+      "levels": [
+        {
+          "skillLevel": 1,
+          "duration": 5.0,
+          "description": {
+            "jp": "5秒間 スコアが10%UPする"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+- `entries` 按 `skillId` 升序排列，`levels` 按 `skillLevel` 升序排列。
+- `simpleDescription.jp` 来源于最高等级的非空 `skillName`；某等级的说明保留在该等级的 `description.jp`。
+- `duration` 映射自游戏技能主数据的浮点字段 `effectValue`；字段缺失时为 `null`。
+- 当前只连接日服，因此本地化对象暂时只有 `jp`。以后增加其他服务器时无需改变字段类型。
+- `skillType` 是当前上游唯一可靠的结构化效果类型。接口不会根据描述文本猜测
+  Bestdori 风格的 `activationEffect`、发动条件或 `onceEffect`。
+
 
 ### 用户数据
 

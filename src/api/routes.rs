@@ -16,23 +16,40 @@ pub fn build(state: SharedState) -> Router {
     let api = Router::new()
         .route("/{server}/application", get(handlers::application))
         .route("/{server}/shops", get(handlers::shops))
+        .route("/{server}/shops/{shop_id}", get(handlers::shop_single))
         .route("/{server}/cards", get(handlers::cards))
+        .route("/{server}/cards/{card_id}", get(handlers::card_single))
         .route("/{server}/music", get(handlers::music_master))
         .route("/{server}/music/{music_id}", get(handlers::music_single))
         .route("/{server}/characters", get(handlers::character_master))
+        .route("/{server}/characters/{character_id}/cards", get(handlers::character_cards))
+        .route("/{server}/characters/{character_id}/costumes", get(handlers::character_costumes))
         .route("/{server}/characters/{character_id}", get(handlers::character_single))
         .route("/{server}/bands", get(handlers::band_master))
+        .route("/{server}/bands/{band_id}/characters", get(handlers::band_characters))
+        .route("/{server}/bands/{band_id}", get(handlers::band_single))
         .route("/{server}/areas", get(handlers::area_master))
+        .route("/{server}/areas/{area_id}", get(handlers::area_single))
         .route("/{server}/gacha", get(handlers::gacha_master))
+        .route("/{server}/gacha/{gacha_id}", get(handlers::gacha_single))
         .route("/{server}/items", get(handlers::item_master))
+        .route("/{server}/items/{item_id}", get(handlers::item_single))
         .route("/{server}/skills", get(handlers::skill_master))
+        .route("/{server}/skills/normalized", get(handlers::skill_master_normalized))
+        .route("/{server}/skills/{skill_id}/cards", get(handlers::skill_cards))
+        .route("/{server}/skills/{skill_id}", get(handlers::skill_single))
         .route("/{server}/stamps", get(handlers::stamp_master))
+        .route("/{server}/stamps/{stamp_id}", get(handlers::stamp_single))
         .route("/{server}/login-bonuses", get(handlers::login_bonus_master))
+        .route("/{server}/login-bonuses/{login_bonus_id}", get(handlers::login_bonus_single))
         .route("/{server}/costumes", get(handlers::costume_master))
+        .route("/{server}/costumes/{costume_id}", get(handlers::costume_single))
         .route("/{server}/events", get(handlers::event_master))
         .route("/{server}/events/{event_id}/ranking", get(handlers::event_ranking))
+        .route("/{server}/events/{event_id}", get(handlers::event_single))
         .route("/{server}/monthly-ranking", get(handlers::monthly_ranking_master))
         .route("/{server}/monthly-ranking/{monthly_id}", get(handlers::monthly_ranking_full))
+        .route("/{server}/monthly-ranking/{monthly_id}/info", get(handlers::monthly_ranking_info))
         .route("/{server}/monthly-ranking/{monthly_id}/top", get(handlers::monthly_ranking_top))
         .route("/{server}/monthly-ranking/{monthly_id}/border", get(handlers::monthly_ranking_border))
         .route("/{server}/user/profile", get(handlers::user_profile))
@@ -63,4 +80,48 @@ pub fn build(state: SharedState) -> Router {
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::api::AppState;
+    use crate::cache::{Cache, Coalescer};
+    use crate::client::GarupaClient;
+    use crate::config::{Config, ServerConfig};
+
+    use super::*;
+
+    #[test]
+    fn router_accepts_all_static_detail_and_relation_routes() {
+        let config = Config {
+            server: ServerConfig {
+                base: String::new(),
+                uid: String::new(),
+                uuid: String::new(),
+                client_version: String::new(),
+                unity_version: String::new(),
+                user_agent: String::new(),
+                client_platform: String::new(),
+                encryption_key: Vec::new(),
+                encryption_iv: Vec::new(),
+                package_url: String::new(),
+            },
+            host: "127.0.0.1".to_string(),
+            port: 8080,
+            api_prefix: "/api".to_string(),
+            log_level: "info".to_string(),
+            http_timeout_ms: 1_000,
+            cache_ttl_ranking_secs: 30,
+            cache_ttl_master_secs: 3_600,
+            cache_ttl_user_secs: 300,
+            version_ttl_secs: 3_600,
+            api_key: String::new(),
+        };
+        let client = GarupaClient::new(&config).unwrap();
+        let state = Arc::new(AppState { config, client, cache: Cache::new(), coalescer: Coalescer::new() });
+
+        let _router = build(state);
+    }
 }

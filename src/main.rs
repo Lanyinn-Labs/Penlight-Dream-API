@@ -338,6 +338,22 @@ mod live_probe {
         "live2d",
         "monthlyRankingReward",
         "monthlyRankingGrade",
+        // Bestdori data domains with no confirmed equivalent in the current
+        // official API. Keeping them in the ignored live scan makes future
+        // server additions discoverable without exposing speculative routes.
+        "chart",
+        "charts",
+        "songMeta",
+        "musicMeta",
+        "festival",
+        "festivalStage",
+        "degree",
+        "degreeList",
+        "eventArchive",
+        "miracleTicket",
+        "miracleTicketExchange",
+        "comic",
+        "comics",
     ];
 
     /// Plausible per-user sub-endpoints not yet covered by the earlier waves.
@@ -557,6 +573,32 @@ mod live_probe {
                 }
                 eprintln!("--- top field union over 3 records ---");
                 eprintln!("{}", top_field_union(&buf, 3));
+            }
+            Err(e) => eprintln!("FAIL: {e}"),
+        }
+    }
+
+    /// Audits every skill row instead of sampling only the first few simple
+    /// score skills. This catches fields that may exist only on conditional,
+    /// recovery, or other rare skill types before the production schema is
+    /// expanded.
+    #[tokio::test]
+    #[ignore = "live network probe"]
+    async fn dump_skill_master() {
+        dotenvy::from_path(".env").ok();
+        let config = Config::from_env().expect("config");
+        if !config.server.enabled() {
+            eprintln!("server disabled, skipping");
+            return;
+        }
+        let client = GarupaClient::new(&config).expect("client");
+        let cfg = &config.server;
+
+        match client.fetch(cfg, &client.skill_master_url(cfg)).await {
+            Ok(buf) => {
+                eprintln!("skill master bytes={}", buf.len());
+                eprintln!("--- field union over every skill row ---");
+                eprintln!("{}", top_field_union(&buf, usize::MAX));
             }
             Err(e) => eprintln!("FAIL: {e}"),
         }

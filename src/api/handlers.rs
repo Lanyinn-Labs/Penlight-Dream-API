@@ -120,6 +120,47 @@ async fn master_fetch(state: &SharedState, key: &str, url: &str, schema: &Schema
     Ok(json_response(body))
 }
 
+/// Returns a cached decoded master-list root. Detail and relationship handlers
+/// use the same cache key as their list endpoint, so adding derived views never
+/// creates an extra upstream request.
+async fn master_list_value(state: &SharedState, key: &str, url: &str, schema: &Schema) -> AppResult<Value> {
+    let body = cached_json(state, key, state.config.cache_ttl_master_secs, url, schema, wrapped_map).await?;
+    Ok(serde_json::from_str(&body)?)
+}
+
+/// Finds a single object in an entries-wrapped master list.
+async fn master_entry(
+    state: &SharedState,
+    key: &str,
+    url: &str,
+    schema: &Schema,
+    id_field: &str,
+    id: i64,
+    resource_name: &str,
+) -> AppResult<Response> {
+    if id < 1 {
+        return Err(AppError::bad_request(format!("{id_field} must be >= 1")));
+    }
+    let root = master_list_value(state, key, url, schema).await?;
+    let entry = root
+        .get("entries")
+        .and_then(Value::as_array)
+        .and_then(|entries| entries.iter().find(|entry| entry.get(id_field).and_then(Value::as_i64) == Some(id)))
+        .cloned()
+        .ok_or_else(|| AppError::not_found(format!("{resource_name} {id} not found")))?;
+    Ok(json_response(entry.to_string()))
+}
+
+/// Builds an entries-wrapped derived view while preserving source order.
+fn filtered_entries(root: &Value, predicate: impl Fn(&Value) -> bool) -> Value {
+    let entries: Vec<Value> = root
+        .get("entries")
+        .and_then(Value::as_array)
+        .map(|entries| entries.iter().filter(|entry| predicate(entry)).cloned().collect())
+        .unwrap_or_default();
+    json!({ "entries": entries })
+}
+
 /// Fetches a user list endpoint and serves its wrapped entries root, cached
 /// under the user data TTL.
 async fn user_list(state: &SharedState, key: &str, url: &str, schema: &Schema) -> AppResult<Response> {
@@ -208,19 +249,47 @@ pub async fn version(State(state): State<SharedState>) -> Json<Value> {
 // Monthly ranking
 // ============================================================================
 
-/// GET /api/{server}/monthly-ranking — master list of monthly ranking periods.
-pub async fn monthly_ranking_master(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let body = cached_json(
-        &state,
+/// Fetches and caches the normalized monthly ranking period list.
+async fn fetch_monthly_master_body(state: &SharedState) -> AppResult<String> {
+    let cfg = jp_config(state)?;
+    cached_json(
+        state,
         "monthly-master",
         state.config.cache_ttl_master_secs,
         &state.client.monthly_ranking_master_url(cfg),
         &MASTER_MONTHLY_RANKING_LIST_SCHEMA,
         |root, _| Ok(json!({ "entries": serde_json::to_value(models::monthly_ranking_list(root))? })),
     )
-    .await?;
+    .await
+}
+
+/// GET /api/{server}/monthly-ranking — master list of monthly ranking periods.
+pub async fn monthly_ranking_master(State(state): State<SharedState>) -> AppResult<Response> {
+    let body = fetch_monthly_master_body(&state).await?;
     Ok(json_response(body))
+}
+
+/// GET /api/{server}/monthly-ranking/{monthly_id}/info — one master period.
+pub async fn monthly_ranking_info(
+    State(state): State<SharedState>,
+    Path((_server, monthly_id)): Path<(String, i64)>,
+) -> AppResult<Response> {
+    if monthly_id < 1 {
+        return Err(AppError::bad_request("monthlyRankingId must be >= 1"));
+    }
+    let body = fetch_monthly_master_body(&state).await?;
+    let root: Value = serde_json::from_str(&body)?;
+    let entry = root
+        .get("entries")
+        .and_then(Value::as_array)
+        .and_then(|entries| {
+            entries
+                .iter()
+                .find(|entry| entry.get("monthlyRankingId").and_then(Value::as_i64) == Some(monthly_id))
+        })
+        .cloned()
+        .ok_or_else(|| AppError::not_found(format!("monthly ranking {monthly_id} not found")))?;
+    Ok(json_response(entry.to_string()))
 }
 
 /// Fetches and caches the serialized monthly ranking report for a period.
@@ -271,25 +340,10 @@ pub async fn monthly_ranking_border(State(state): State<SharedState>, Path((_ser
 // Event
 // ============================================================================
 
-/// GET /api/{server}/events — master list of events.
-pub async fn event_master(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let body = cached_json(
-        &state,
-        "event-master",
-        state.config.cache_ttl_master_secs,
-        &state.client.event_master_url(cfg),
-        &MASTER_EVENT_LIST_SCHEMA,
-        |root, _| Ok(json!({ "entries": serde_json::to_value(models::event_list(root))? })),
-    )
-    .await?;
-    Ok(json_response(body))
-}
-
-/// Fetches the event master list as a bare entries array for type resolution.
-async fn fetch_event_master_value(state: &SharedState) -> AppResult<Value> {
+/// Fetches and caches the normalized event master list.
+async fn fetch_event_master_body(state: &SharedState) -> AppResult<String> {
     let cfg = jp_config(state)?;
-    let body = cached_json(
+    cached_json(
         state,
         "event-master",
         state.config.cache_ttl_master_secs,
@@ -297,7 +351,35 @@ async fn fetch_event_master_value(state: &SharedState) -> AppResult<Value> {
         &MASTER_EVENT_LIST_SCHEMA,
         |root, _| Ok(json!({ "entries": serde_json::to_value(models::event_list(root))? })),
     )
-    .await?;
+    .await
+}
+
+/// GET /api/{server}/events — master list of events.
+pub async fn event_master(State(state): State<SharedState>) -> AppResult<Response> {
+    let body = fetch_event_master_body(&state).await?;
+    Ok(json_response(body))
+}
+
+/// GET /api/{server}/events/{event_id} — one event from the cached master list.
+pub async fn event_single(
+    State(state): State<SharedState>,
+    Path((_server, event_id)): Path<(String, i64)>,
+) -> AppResult<Response> {
+    if event_id < 1 {
+        return Err(AppError::bad_request("eventId must be >= 1"));
+    }
+    let events = fetch_event_master_value(&state).await?;
+    let entry = events
+        .as_array()
+        .and_then(|entries| entries.iter().find(|entry| entry.get("eventId").and_then(Value::as_i64) == Some(event_id)))
+        .cloned()
+        .ok_or_else(|| AppError::not_found(format!("event {event_id} not found")))?;
+    Ok(json_response(entry.to_string()))
+}
+
+/// Fetches the event master list as a bare entries array for type resolution.
+async fn fetch_event_master_value(state: &SharedState) -> AppResult<Value> {
+    let body = fetch_event_master_body(state).await?;
     let wrapped: Value = serde_json::from_str(&body)?;
     Ok(wrapped.get("entries").cloned().unwrap_or_else(|| Value::Array(Vec::new())))
 }
@@ -411,10 +493,61 @@ pub async fn character_single(State(state): State<SharedState>, Path((_server, c
     master_fetch(&state, &key, &state.client.character_single_url(cfg, character_id), &CHARACTER_SCHEMA).await
 }
 
+/// GET /api/{server}/characters/{character_id}/cards — cards for a character.
+pub async fn character_cards(
+    State(state): State<SharedState>,
+    Path((_server, character_id)): Path<(String, i64)>,
+) -> AppResult<Response> {
+    if character_id < 1 {
+        return Err(AppError::bad_request("characterId must be >= 1"));
+    }
+    let cfg = jp_config(&state)?;
+    let root = master_list_value(&state, "situation-master", &state.client.situation_master_url(cfg), &SITUATION_LIST_SCHEMA).await?;
+    Ok(json_response(
+        filtered_entries(&root, |entry| entry.get("characterIndex").and_then(Value::as_i64) == Some(character_id)).to_string(),
+    ))
+}
+
+/// GET /api/{server}/characters/{character_id}/costumes — costumes for a character.
+pub async fn character_costumes(
+    State(state): State<SharedState>,
+    Path((_server, character_id)): Path<(String, i64)>,
+) -> AppResult<Response> {
+    if character_id < 1 {
+        return Err(AppError::bad_request("characterId must be >= 1"));
+    }
+    let cfg = jp_config(&state)?;
+    let root = master_list_value(&state, "costume-master", &state.client.costume_master_url(cfg), &COSTUME_LIST_SCHEMA).await?;
+    Ok(json_response(
+        filtered_entries(&root, |entry| entry.get("characterId").and_then(Value::as_i64) == Some(character_id)).to_string(),
+    ))
+}
+
 /// GET /api/{server}/bands — band master list.
 pub async fn band_master(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
     master_list(&state, "band-master", &state.client.band_master_url(cfg), &BAND_LIST_SCHEMA).await
+}
+
+/// GET /api/{server}/bands/{band_id} — one band from the cached master list.
+pub async fn band_single(State(state): State<SharedState>, Path((_server, band_id)): Path<(String, i64)>) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    master_entry(&state, "band-master", &state.client.band_master_url(cfg), &BAND_LIST_SCHEMA, "bandId", band_id, "band").await
+}
+
+/// GET /api/{server}/bands/{band_id}/characters — band members.
+pub async fn band_characters(
+    State(state): State<SharedState>,
+    Path((_server, band_id)): Path<(String, i64)>,
+) -> AppResult<Response> {
+    if band_id < 1 {
+        return Err(AppError::bad_request("bandId must be >= 1"));
+    }
+    let cfg = jp_config(&state)?;
+    let root = master_list_value(&state, "character-master", &state.client.character_master_url(cfg), &CHARACTER_LIST_SCHEMA).await?;
+    Ok(json_response(
+        filtered_entries(&root, |entry| entry.get("bandId").and_then(Value::as_i64) == Some(band_id)).to_string(),
+    ))
 }
 
 /// GET /api/{server}/areas — area master list.
@@ -423,10 +556,22 @@ pub async fn area_master(State(state): State<SharedState>) -> AppResult<Response
     master_list(&state, "area-master", &state.client.area_master_url(cfg), &AREA_LIST_SCHEMA).await
 }
 
+/// GET /api/{server}/areas/{area_id} — one area from the cached master list.
+pub async fn area_single(State(state): State<SharedState>, Path((_server, area_id)): Path<(String, i64)>) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    master_entry(&state, "area-master", &state.client.area_master_url(cfg), &AREA_LIST_SCHEMA, "areaId", area_id, "area").await
+}
+
 /// GET /api/{server}/gacha — gacha master list.
 pub async fn gacha_master(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
     master_list(&state, "gacha-master", &state.client.gacha_master_url(cfg), &GACHA_LIST_SCHEMA).await
+}
+
+/// GET /api/{server}/gacha/{gacha_id} — one gacha from the cached master list.
+pub async fn gacha_single(State(state): State<SharedState>, Path((_server, gacha_id)): Path<(String, i64)>) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    master_entry(&state, "gacha-master", &state.client.gacha_master_url(cfg), &GACHA_LIST_SCHEMA, "gachaId", gacha_id, "gacha").await
 }
 
 /// GET /api/{server}/items — item master list.
@@ -435,10 +580,61 @@ pub async fn item_master(State(state): State<SharedState>) -> AppResult<Response
     master_list(&state, "item-master", &state.client.item_master_url(cfg), &ITEM_LIST_SCHEMA).await
 }
 
+/// GET /api/{server}/items/{item_id} — one item from the cached master list.
+pub async fn item_single(State(state): State<SharedState>, Path((_server, item_id)): Path<(String, i64)>) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    master_entry(&state, "item-master", &state.client.item_master_url(cfg), &ITEM_LIST_SCHEMA, "itemId", item_id, "item").await
+}
+
 /// GET /api/{server}/skills — skill master list.
 pub async fn skill_master(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
     master_list(&state, "skill-master", &state.client.skill_master_url(cfg), &SKILL_LIST_SCHEMA).await
+}
+
+/// GET /api/{server}/skills/normalized — skills grouped by ID with an ordered
+/// level list and an explicit duration field. The raw endpoint remains
+/// unchanged for backwards compatibility.
+pub async fn skill_master_normalized(State(state): State<SharedState>) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    let root = master_list_value(&state, "skill-master", &state.client.skill_master_url(cfg), &SKILL_LIST_SCHEMA).await?;
+    Ok(json_response(json!({ "entries": serde_json::to_value(models::skill_list(&root))? }).to_string()))
+}
+
+/// GET /api/{server}/skills/{skill_id} — one normalized skill with all levels.
+pub async fn skill_single(
+    State(state): State<SharedState>,
+    Path((_server, skill_id)): Path<(String, i64)>,
+) -> AppResult<Response> {
+    if skill_id < 1 {
+        return Err(AppError::bad_request("skillId must be >= 1"));
+    }
+    let cfg = jp_config(&state)?;
+    let root = master_list_value(&state, "skill-master", &state.client.skill_master_url(cfg), &SKILL_LIST_SCHEMA).await?;
+    let skill = models::skill_list(&root)
+        .into_iter()
+        .find(|skill| skill.skill_id == skill_id)
+        .ok_or_else(|| AppError::not_found(format!("skill {skill_id} not found")))?;
+    Ok(json_response(serde_json::to_string(&skill)?))
+}
+
+/// GET /api/{server}/skills/{skill_id}/cards — cards using a skill.
+pub async fn skill_cards(
+    State(state): State<SharedState>,
+    Path((_server, skill_id)): Path<(String, i64)>,
+) -> AppResult<Response> {
+    if skill_id < 1 {
+        return Err(AppError::bad_request("skillId must be >= 1"));
+    }
+    let cfg = jp_config(&state)?;
+    let root = master_list_value(&state, "situation-master", &state.client.situation_master_url(cfg), &SITUATION_LIST_SCHEMA).await?;
+    Ok(json_response(
+        filtered_entries(&root, |entry| {
+            entry.get("skillId").and_then(Value::as_i64) == Some(skill_id)
+                || entry.get("skillId2").and_then(Value::as_i64) == Some(skill_id)
+        })
+        .to_string(),
+    ))
 }
 
 /// GET /api/{server}/stamps — stamp master list.
@@ -447,10 +643,34 @@ pub async fn stamp_master(State(state): State<SharedState>) -> AppResult<Respons
     master_list(&state, "stamp-master", &state.client.stamp_master_url(cfg), &STAMP_LIST_SCHEMA).await
 }
 
+/// GET /api/{server}/stamps/{stamp_id} — one stamp from the cached master list.
+pub async fn stamp_single(State(state): State<SharedState>, Path((_server, stamp_id)): Path<(String, i64)>) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    master_entry(&state, "stamp-master", &state.client.stamp_master_url(cfg), &STAMP_LIST_SCHEMA, "stampId", stamp_id, "stamp").await
+}
+
 /// GET /api/{server}/login-bonuses — login bonus master list.
 pub async fn login_bonus_master(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
     master_list(&state, "loginbonus-master", &state.client.login_bonus_master_url(cfg), &LOGIN_BONUS_LIST_SCHEMA).await
+}
+
+/// GET /api/{server}/login-bonuses/{login_bonus_id} — one campaign.
+pub async fn login_bonus_single(
+    State(state): State<SharedState>,
+    Path((_server, login_bonus_id)): Path<(String, i64)>,
+) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    master_entry(
+        &state,
+        "loginbonus-master",
+        &state.client.login_bonus_master_url(cfg),
+        &LOGIN_BONUS_LIST_SCHEMA,
+        "loginBonusId",
+        login_bonus_id,
+        "login bonus",
+    )
+    .await
 }
 
 /// GET /api/{server}/costumes — costume master list.
@@ -459,10 +679,34 @@ pub async fn costume_master(State(state): State<SharedState>) -> AppResult<Respo
     master_list(&state, "costume-master", &state.client.costume_master_url(cfg), &COSTUME_LIST_SCHEMA).await
 }
 
+/// GET /api/{server}/costumes/{costume_id} — one costume.
+pub async fn costume_single(
+    State(state): State<SharedState>,
+    Path((_server, costume_id)): Path<(String, i64)>,
+) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    master_entry(
+        &state,
+        "costume-master",
+        &state.client.costume_master_url(cfg),
+        &COSTUME_LIST_SCHEMA,
+        "costumeId",
+        costume_id,
+        "costume",
+    )
+    .await
+}
+
 /// GET /api/{server}/shops — shop master list.
 pub async fn shops(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
     master_list(&state, "shop-master", &state.client.shop_url(cfg), &SHOP_LIST_SCHEMA).await
+}
+
+/// GET /api/{server}/shops/{shop_id} — one shop.
+pub async fn shop_single(State(state): State<SharedState>, Path((_server, shop_id)): Path<(String, i64)>) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    master_entry(&state, "shop-master", &state.client.shop_url(cfg), &SHOP_LIST_SCHEMA, "shopId", shop_id, "shop").await
 }
 
 /// GET /api/{server}/cards — card master list. The game serves cards under the
@@ -470,6 +714,21 @@ pub async fn shops(State(state): State<SharedState>) -> AppResult<Response> {
 pub async fn cards(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
     master_list(&state, "situation-master", &state.client.situation_master_url(cfg), &SITUATION_LIST_SCHEMA).await
+}
+
+/// GET /api/{server}/cards/{card_id} — one card from the situation master.
+pub async fn card_single(State(state): State<SharedState>, Path((_server, card_id)): Path<(String, i64)>) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    master_entry(
+        &state,
+        "situation-master",
+        &state.client.situation_master_url(cfg),
+        &SITUATION_LIST_SCHEMA,
+        "situationId",
+        card_id,
+        "card",
+    )
+    .await
 }
 
 // ============================================================================
@@ -629,5 +888,27 @@ mod tests {
         let root = json!({ "presentBox": { "slotCount": 100 } });
         let raw = [0x12, 0x06, 0x08, 0x64];
         assert_eq!(wrapped_map(&root, &raw).unwrap(), root);
+    }
+
+    #[test]
+    fn filtered_entries_preserves_order_and_wrapper() {
+        let root = json!({
+            "entries": [
+                { "id": 3, "group": 1 },
+                { "id": 1, "group": 2 },
+                { "id": 2, "group": 1 }
+            ]
+        });
+
+        assert_eq!(
+            filtered_entries(&root, |entry| entry.get("group").and_then(Value::as_i64) == Some(1)),
+            json!({ "entries": [{ "id": 3, "group": 1 }, { "id": 2, "group": 1 }] })
+        );
+    }
+
+    #[test]
+    fn filtered_entries_returns_an_empty_list_for_invalid_roots() {
+        assert_eq!(filtered_entries(&json!({}), |_| true), json!({ "entries": [] }));
+        assert_eq!(filtered_entries(&json!({ "entries": null }), |_| true), json!({ "entries": [] }));
     }
 }
