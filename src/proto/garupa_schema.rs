@@ -1105,11 +1105,47 @@ pub static USER_CHARACTER_RANK_MAP_SCHEMA: Schema = Schema {
     fields: &[(1, field("entries", ProtoType::Message(&USER_CHARACTER_RANK_MAP_ENTRY_SCHEMA), true))],
 };
 
+/// The three released potential dimensions for one character.
+pub static USER_CHARACTER_POTENTIAL_LEVEL_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("performanceLevel", ProtoType::Int, false)),
+        (2, field("techniqueLevel", ProtoType::Int, false)),
+        (3, field("visualLevel", ProtoType::Int, false)),
+    ],
+};
+
+pub static USER_CHARACTER_POTENTIAL_LEVEL_MAP_ENTRY_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("key", ProtoType::Int, false)),
+        (2, field("value", ProtoType::Message(&USER_CHARACTER_POTENTIAL_LEVEL_SCHEMA), false)),
+    ],
+};
+
+pub static USER_CHARACTER_POTENTIAL_LEVEL_MAP_SCHEMA: Schema = Schema {
+    fields: &[(
+        1,
+        field(
+            "entries",
+            ProtoType::Message(&USER_CHARACTER_POTENTIAL_LEVEL_MAP_ENTRY_SCHEMA),
+            true,
+        ),
+    )],
+};
+
 /// The complete suite snapshot fields used by the production user APIs.
-/// Field 22 contains enabled area items; field 400 contains character ranks.
+/// Field 22 contains enabled area items, field 400 contains character ranks,
+/// and field 401 contains the three-dimensional potential levels.
 pub static SUITE_USER_RESPONSE_SCHEMA: Schema = Schema {
     fields: &[
         (22, field("userAreaItemMap", ProtoType::Message(&USER_AREA_ITEM_MAP_SCHEMA), false)),
         (400, field("userCharacterRankMap", ProtoType::Message(&USER_CHARACTER_RANK_MAP_SCHEMA), false)),
+        (
+            401,
+            field(
+                "userCharacterPotentialLevelMap",
+                ProtoType::Message(&USER_CHARACTER_POTENTIAL_LEVEL_MAP_SCHEMA),
+                false,
+            ),
+        ),
     ],
 };

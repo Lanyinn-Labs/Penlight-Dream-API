@@ -153,7 +153,8 @@ curl http://127.0.0.1:8080/api/en/music
 
 `user/areas` 的每个区域道具现在包含 `areaItemId`、`status`、`areaItemCategory` 和 `level`。
 `user/characters` 的每条角色记录现在包含 `characterId`、`rank`、`exp`、`addExp`、`nextExp`、
-`totalExp` 和 `releasedPotentialLevel`。
+`totalExp`、`releasedPotentialLevel`，以及三维 `potentialLevel`（`performanceLevel`、
+`techniqueLevel`、`visualLevel`）。
 
 ### 缓存
 

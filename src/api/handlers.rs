@@ -219,6 +219,46 @@ fn suite_map_values(root: &Value, map_name: &str, key_name: Option<&str>) -> Val
     json!({ "entries": entries })
 }
 
+/// Joins character rank entries with the separate three-dimensional potential
+/// level map from the same suite snapshot.
+fn suite_character_rank_values(root: &Value) -> Value {
+    let potential_entries = root
+        .get("userCharacterPotentialLevelMap")
+        .and_then(|map| map.get("entries"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let entries = root
+        .get("userCharacterRankMap")
+        .and_then(|map| map.get("entries"))
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let key = entry.get("key")?.clone();
+                    let mut value = entry.get("value")?.clone();
+                    let object = value.as_object_mut()?;
+                    object.insert("characterId".to_string(), key.clone());
+
+                    if let Some(potential) = potential_entries
+                        .iter()
+                        .find(|entry| entry.get("key") == Some(&key))
+                        .and_then(|entry| entry.get("value"))
+                    {
+                        object.insert("potentialLevel".to_string(), potential.clone());
+                    }
+
+                    Some(value)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    json!({ "entries": entries })
+}
+
 // ============================================================================
 // Server metadata
 // ============================================================================
@@ -874,7 +914,7 @@ pub async fn user_costumes(State(state): State<SharedState>) -> AppResult<Respon
 pub async fn user_characters(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
     let root = suite_user_value(&state, &format!("suite-user:{}", cfg.uid)).await?;
-    Ok(json_response(suite_map_values(&root, "userCharacterRankMap", Some("characterId")).to_string()))
+    Ok(json_response(suite_character_rank_values(&root).to_string()))
 }
 
 /// GET /api/{server}/user/area-statuses — raw area status records.
