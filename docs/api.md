@@ -147,14 +147,18 @@ curl http://127.0.0.1:8080/api/en/music
 | GET | `/api/{server}/user/missions` | 用户任务进度 |
 | GET | `/api/{server}/user/login-bonuses` | 用户登录奖励进度 |
 | GET | `/api/{server}/user/costumes` | 用户拥有的服装 |
-| GET | `/api/{server}/user/characters` | 用户角色等级、经验和已释放潜力等级 |
+| GET | `/api/{server}/user/characters` | 用户角色等级、经验、潜力和角色任务加成 |
+| GET | `/api/{server}/user/character-mission-bonuses` | 用户角色任务加成明细 |
 | GET | `/api/{server}/user/area-statuses` | 用户区域状态记录 |
 | GET | `/api/{server}/user/character-affinity` | 用户角色亲密度记录 |
 
 `user/areas` 的每个区域道具现在包含 `areaItemId`、`status`、`areaItemCategory` 和 `level`。
 `user/characters` 的每条角色记录现在包含 `characterId`、`rank`、`exp`、`addExp`、`nextExp`、
 `totalExp`、`releasedPotentialLevel`，以及三维 `potentialLevel`（`performanceLevel`、
-`techniqueLevel`、`visualLevel`）。
+`techniqueLevel`、`visualLevel`）。存在角色任务加成时，还会返回 `characterMissionBonus` 数组，
+其中每项包含 `characterId`、`characterBonusType`、`performance`、`technique` 和 `visual`。
+`user/character-mission-bonuses` 返回同样的明细数组，数据来自官方 Suite 用户快照的
+`userCharacterMissionBonusMap` 字段。
 
 ### 缓存
 

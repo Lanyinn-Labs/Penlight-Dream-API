@@ -66,6 +66,7 @@ pub fn build(state: SharedState) -> Router {
         .route("/{server}/user/login-bonuses", get(handlers::user_login_bonuses))
         .route("/{server}/user/costumes", get(handlers::user_costumes))
         .route("/{server}/user/characters", get(handlers::user_characters))
+        .route("/{server}/user/character-mission-bonuses", get(handlers::user_character_mission_bonuses))
         .route("/{server}/user/area-statuses", get(handlers::user_area_statuses))
         .route("/{server}/user/character-affinity", get(handlers::user_character_affinity))
         .route("/{server}/cache", get(handlers::cache_stats).delete(handlers::cache_clear))

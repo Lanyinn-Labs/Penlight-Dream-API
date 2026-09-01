@@ -1132,9 +1132,36 @@ pub static USER_CHARACTER_POTENTIAL_LEVEL_MAP_SCHEMA: Schema = Schema {
     )],
 };
 
+/// A character bonus granted by character missions.
+pub static USER_CHARACTER_MISSION_BONUS_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("characterId", ProtoType::Int, false)),
+        (2, field("characterBonusType", ProtoType::String, false)),
+        (3, field("performance", ProtoType::Float, false)),
+        (4, field("technique", ProtoType::Float, false)),
+        (5, field("visual", ProtoType::Float, false)),
+    ],
+};
+
+pub static USER_CHARACTER_MISSION_BONUS_LIST_SCHEMA: Schema = Schema {
+    fields: &[(1, field("entries", ProtoType::Message(&USER_CHARACTER_MISSION_BONUS_SCHEMA), true))],
+};
+
+pub static USER_CHARACTER_MISSION_BONUS_MAP_ENTRY_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("key", ProtoType::Int, false)),
+        (2, field("value", ProtoType::Message(&USER_CHARACTER_MISSION_BONUS_LIST_SCHEMA), false)),
+    ],
+};
+
+pub static USER_CHARACTER_MISSION_BONUS_MAP_SCHEMA: Schema = Schema {
+    fields: &[(1, field("entries", ProtoType::Message(&USER_CHARACTER_MISSION_BONUS_MAP_ENTRY_SCHEMA), true))],
+};
+
 /// The complete suite snapshot fields used by the production user APIs.
 /// Field 22 contains enabled area items, field 400 contains character ranks,
-/// and field 401 contains the three-dimensional potential levels.
+/// field 401 contains the three-dimensional potential levels, and field 456
+/// contains character mission bonuses.
 pub static SUITE_USER_RESPONSE_SCHEMA: Schema = Schema {
     fields: &[
         (22, field("userAreaItemMap", ProtoType::Message(&USER_AREA_ITEM_MAP_SCHEMA), false)),
@@ -1144,6 +1171,14 @@ pub static SUITE_USER_RESPONSE_SCHEMA: Schema = Schema {
             field(
                 "userCharacterPotentialLevelMap",
                 ProtoType::Message(&USER_CHARACTER_POTENTIAL_LEVEL_MAP_SCHEMA),
+                false,
+            ),
+        ),
+        (
+            456,
+            field(
+                "userCharacterMissionBonusMap",
+                ProtoType::Message(&USER_CHARACTER_MISSION_BONUS_MAP_SCHEMA),
                 false,
             ),
         ),

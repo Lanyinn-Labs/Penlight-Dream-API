@@ -219,8 +219,41 @@ fn suite_map_values(root: &Value, map_name: &str, key_name: Option<&str>) -> Val
     json!({ "entries": entries })
 }
 
+/// Flattens the character-mission-bonus map into public API entries.
+fn suite_character_mission_bonus_entries(root: &Value) -> Vec<Value> {
+    let mut result = Vec::new();
+    let map_entries = root
+        .get("userCharacterMissionBonusMap")
+        .and_then(|map| map.get("entries"))
+        .and_then(Value::as_array);
+
+    if let Some(map_entries) = map_entries {
+        for map_entry in map_entries {
+            let key = map_entry.get("key").cloned();
+            let bonuses = map_entry
+                .get("value")
+                .and_then(|value| value.get("entries"))
+                .and_then(Value::as_array);
+
+            if let Some(bonuses) = bonuses {
+                for bonus in bonuses {
+                    let mut bonus = bonus.clone();
+                    if bonus.get("characterId").is_none() {
+                        if let (Some(key), Some(object)) = (&key, bonus.as_object_mut()) {
+                            object.insert("characterId".to_string(), key.clone());
+                        }
+                    }
+                    result.push(bonus);
+                }
+            }
+        }
+    }
+
+    result
+}
+
 /// Joins character rank entries with the separate three-dimensional potential
-/// level map from the same suite snapshot.
+/// level map and character-mission-bonus map from the same suite snapshot.
 fn suite_character_rank_values(root: &Value) -> Value {
     let potential_entries = root
         .get("userCharacterPotentialLevelMap")
@@ -228,6 +261,7 @@ fn suite_character_rank_values(root: &Value) -> Value {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let mission_bonus_entries = suite_character_mission_bonus_entries(root);
 
     let entries = root
         .get("userCharacterRankMap")
@@ -248,6 +282,15 @@ fn suite_character_rank_values(root: &Value) -> Value {
                         .and_then(|entry| entry.get("value"))
                     {
                         object.insert("potentialLevel".to_string(), potential.clone());
+                    }
+
+                    let mission_bonuses: Vec<Value> = mission_bonus_entries
+                        .iter()
+                        .filter(|bonus| bonus.get("characterId") == Some(&key))
+                        .cloned()
+                        .collect();
+                    if !mission_bonuses.is_empty() {
+                        object.insert("characterMissionBonus".to_string(), Value::Array(mission_bonuses));
                     }
 
                     Some(value)
@@ -915,6 +958,13 @@ pub async fn user_characters(State(state): State<SharedState>) -> AppResult<Resp
     let cfg = jp_config(&state)?;
     let root = suite_user_value(&state, &format!("suite-user:{}", cfg.uid)).await?;
     Ok(json_response(suite_character_rank_values(&root).to_string()))
+}
+
+/// GET /api/{server}/user/character-mission-bonuses — character mission bonuses.
+pub async fn user_character_mission_bonuses(State(state): State<SharedState>) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    let root = suite_user_value(&state, &format!("suite-user:{}", cfg.uid)).await?;
+    Ok(json_response(json!({ "entries": suite_character_mission_bonus_entries(&root) }).to_string()))
 }
 
 /// GET /api/{server}/user/area-statuses — raw area status records.
