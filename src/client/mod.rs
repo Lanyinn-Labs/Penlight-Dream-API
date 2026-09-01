@@ -246,6 +246,15 @@ impl GarupaClient {
         format!("{}user/{}", cfg.base, cfg.uid)
     }
 
+    /// Returns the authenticated user's complete game-data snapshot.
+    ///
+    /// Unlike the individual `/user/{uid}/...` resources, this suite response
+    /// contains the area-item map and character-rank map used by the profile
+    /// screen.
+    pub fn suite_user_url(&self, cfg: &ServerConfig) -> String {
+        format!("{}suite/user/{}", cfg.base, cfg.uid)
+    }
+
     pub fn user_deck_url(&self, cfg: &ServerConfig) -> String {
         format!("{}user/{}/deck", cfg.base, cfg.uid)
     }

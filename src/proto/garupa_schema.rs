@@ -905,7 +905,7 @@ pub static USER_STAMP_LIST_SCHEMA: Schema = Schema {
     fields: &[(1, field("entries", ProtoType::Message(&USER_STAMP_SCHEMA), true))],
 };
 
-pub static USER_AREA_ITEM_SCHEMA: Schema = Schema {
+pub static USER_AREA_STATUS_ITEM_SCHEMA: Schema = Schema {
     fields: &[
         (1, field("areaItemId", ProtoType::Int, false)),
         (2, field("status", ProtoType::String, false)),
@@ -915,7 +915,7 @@ pub static USER_AREA_ITEM_SCHEMA: Schema = Schema {
 pub static USER_AREA_SCHEMA: Schema = Schema {
     fields: &[
         (1, field("areaId", ProtoType::Int, false)),
-        (2, field("areaItems", ProtoType::Message(&USER_AREA_ITEM_SCHEMA), true)),
+        (2, field("areaItems", ProtoType::Message(&USER_AREA_STATUS_ITEM_SCHEMA), true)),
     ],
 };
 
@@ -1045,16 +1045,71 @@ pub static USER_COSTUME_LIST_SCHEMA: Schema = Schema {
     fields: &[(1, field("entries", ProtoType::Message(&USER_COSTUME_SCHEMA), true))],
 };
 
-/// A character affinity row for the configured user. Note the user id sits on
-/// field 2, not field 1, per the live dump; field 5 is the accumulated exp.
+/// An owned-character row from the individual user-character endpoint.
 pub static USER_CHARACTER_SCHEMA: Schema = Schema {
     fields: &[
+        (1, field("userCharacterId", ProtoType::Long, false)),
         (2, field("userId", ProtoType::Long, false)),
         (3, field("characterId", ProtoType::Int, false)),
-        (5, field("exp", ProtoType::Int, false)),
+        (4, field("closeness", ProtoType::Int, false)),
+        (5, field("costumeId", ProtoType::Int, false)),
     ],
 };
 
 pub static USER_CHARACTER_LIST_SCHEMA: Schema = Schema {
     fields: &[(1, field("entries", ProtoType::Message(&USER_CHARACTER_SCHEMA), true))],
+};
+
+/// Character rank data is carried by the complete suite user snapshot.
+pub static USER_CHARACTER_RANK_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("rank", ProtoType::Int, false)),
+        (2, field("exp", ProtoType::Long, false)),
+        (3, field("addExp", ProtoType::Long, false)),
+        (4, field("nextExp", ProtoType::Long, false)),
+        (5, field("totalExp", ProtoType::Long, false)),
+        (6, field("releasedPotentialLevel", ProtoType::Long, false)),
+    ],
+};
+
+/// An enabled area item from the complete suite user snapshot.
+pub static USER_AREA_ITEM_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("userId", ProtoType::Long, false)),
+        (2, field("areaItemId", ProtoType::Int, false)),
+        (3, field("areaItemCategory", ProtoType::Int, false)),
+        (4, field("level", ProtoType::Int, false)),
+    ],
+};
+
+/// Protobuf maps are encoded as repeated key/value messages.
+pub static USER_AREA_ITEM_MAP_ENTRY_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("key", ProtoType::Int, false)),
+        (2, field("value", ProtoType::Message(&USER_AREA_ITEM_SCHEMA), false)),
+    ],
+};
+
+pub static USER_AREA_ITEM_MAP_SCHEMA: Schema = Schema {
+    fields: &[(1, field("entries", ProtoType::Message(&USER_AREA_ITEM_MAP_ENTRY_SCHEMA), true))],
+};
+
+pub static USER_CHARACTER_RANK_MAP_ENTRY_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("key", ProtoType::Int, false)),
+        (2, field("value", ProtoType::Message(&USER_CHARACTER_RANK_SCHEMA), false)),
+    ],
+};
+
+pub static USER_CHARACTER_RANK_MAP_SCHEMA: Schema = Schema {
+    fields: &[(1, field("entries", ProtoType::Message(&USER_CHARACTER_RANK_MAP_ENTRY_SCHEMA), true))],
+};
+
+/// The complete suite snapshot fields used by the production user APIs.
+/// Field 22 contains enabled area items; field 400 contains character ranks.
+pub static SUITE_USER_RESPONSE_SCHEMA: Schema = Schema {
+    fields: &[
+        (22, field("userAreaItemMap", ProtoType::Message(&USER_AREA_ITEM_MAP_SCHEMA), false)),
+        (400, field("userCharacterRankMap", ProtoType::Message(&USER_CHARACTER_RANK_MAP_SCHEMA), false)),
+    ],
 };

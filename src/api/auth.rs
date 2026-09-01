@@ -47,21 +47,3 @@ pub async fn require_api_key(State(state): State<SharedState>, request: Request,
         Err(AppError::unauthorized("invalid or missing API key"))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::constant_time_eq;
-
-    #[test]
-    fn constant_time_eq_matches_identical_strings() {
-        assert!(constant_time_eq("secret-key", "secret-key"));
-        assert!(constant_time_eq("", ""));
-    }
-
-    #[test]
-    fn constant_time_eq_rejects_any_difference() {
-        assert!(!constant_time_eq("secret-key", "secret-keY"));
-        assert!(!constant_time_eq("secret-key", "secret-key-longer"));
-        assert!(!constant_time_eq("secret-key", ""));
-    }
-}

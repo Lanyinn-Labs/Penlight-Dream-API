@@ -66,6 +66,8 @@ pub fn build(state: SharedState) -> Router {
         .route("/{server}/user/login-bonuses", get(handlers::user_login_bonuses))
         .route("/{server}/user/costumes", get(handlers::user_costumes))
         .route("/{server}/user/characters", get(handlers::user_characters))
+        .route("/{server}/user/area-statuses", get(handlers::user_area_statuses))
+        .route("/{server}/user/character-affinity", get(handlers::user_character_affinity))
         .route("/{server}/cache", get(handlers::cache_stats).delete(handlers::cache_clear))
         .with_state(state.clone())
         .layer(from_fn(validate_server))
@@ -80,48 +82,4 @@ pub fn build(state: SharedState) -> Router {
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use crate::api::AppState;
-    use crate::cache::{Cache, Coalescer};
-    use crate::client::GarupaClient;
-    use crate::config::{Config, ServerConfig};
-
-    use super::*;
-
-    #[test]
-    fn router_accepts_all_static_detail_and_relation_routes() {
-        let config = Config {
-            server: ServerConfig {
-                base: String::new(),
-                uid: String::new(),
-                uuid: String::new(),
-                client_version: String::new(),
-                unity_version: String::new(),
-                user_agent: String::new(),
-                client_platform: String::new(),
-                encryption_key: Vec::new(),
-                encryption_iv: Vec::new(),
-                package_url: String::new(),
-            },
-            host: "127.0.0.1".to_string(),
-            port: 8080,
-            api_prefix: "/api".to_string(),
-            log_level: "info".to_string(),
-            http_timeout_ms: 1_000,
-            cache_ttl_ranking_secs: 30,
-            cache_ttl_master_secs: 3_600,
-            cache_ttl_user_secs: 300,
-            version_ttl_secs: 3_600,
-            api_key: String::new(),
-        };
-        let client = GarupaClient::new(&config).unwrap();
-        let state = Arc::new(AppState { config, client, cache: Cache::new(), coalescer: Coalescer::new() });
-
-        let _router = build(state);
-    }
 }

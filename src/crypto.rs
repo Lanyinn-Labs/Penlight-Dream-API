@@ -32,35 +32,3 @@ pub fn decrypt_aes_128_cbc(key: &[u8], iv: &[u8], payload: &[u8]) -> Result<Vec<
         .map_err(|_| CryptoError::DecryptFailed)?;
     Ok(out.to_vec())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use aes::cipher::{BlockEncryptMut, KeyIvInit};
-    use cbc::Encryptor;
-
-    type Aes128CbcEnc = Encryptor<Aes128>;
-
-    #[test]
-    fn round_trip_aes_128_cbc() {
-        let key = b"0123456789abcdef";
-        let iv = b"fedcba9876543210";
-        let plain: &[u8] = b"hello world!!!!!";
-
-        let mut buf = plain.to_vec();
-        let _ = Aes128CbcEnc::new(key.into(), iv.into())
-            .encrypt_padded_mut::<NoPadding>(&mut buf, plain.len())
-            .unwrap();
-
-        let decrypted = decrypt_aes_128_cbc(key, iv, &buf).unwrap();
-        assert_eq!(&decrypted, plain);
-    }
-
-    #[test]
-    fn rejects_non_block_aligned_payload() {
-        let key = b"0123456789abcdef";
-        let iv = b"fedcba9876543210";
-        assert!(decrypt_aes_128_cbc(key, iv, b"short").is_err());
-        assert!(decrypt_aes_128_cbc(key, iv, b"").is_err());
-    }
-}

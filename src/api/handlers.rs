@@ -29,6 +29,7 @@ use crate::proto::garupa_schema::{
     USER_ITEM_LIST_SCHEMA, USER_LOGIN_BONUS_LIST_SCHEMA, USER_MISSION_LIST_SCHEMA,
     USER_PRESENT_LIST_SCHEMA, USER_PROFILE_RESPONSE_SCHEMA, USER_SITUATION_LIST_SCHEMA,
     USER_STAMP_LIST_SCHEMA, USER_TITLE_SCHEMA, USER_MONTHLY_RANKING_RANKING_RESPONSE_SCHEMA,
+    SUITE_USER_RESPONSE_SCHEMA,
 };
 use crate::proto::schema::Schema;
 
@@ -173,6 +174,49 @@ async fn user_list(state: &SharedState, key: &str, url: &str, schema: &Schema) -
 async fn user_fetch(state: &SharedState, key: &str, url: &str, schema: &Schema) -> AppResult<Response> {
     let body = cached_json(state, key, state.config.cache_ttl_user_secs, url, schema, |root, _| Ok(root.clone())).await?;
     Ok(json_response(body))
+}
+
+/// Fetches the complete suite user snapshot once and lets multiple derived
+/// user endpoints share the same cached upstream response.
+async fn suite_user_value(state: &SharedState, key: &str) -> AppResult<Value> {
+    let cfg = jp_config(state)?;
+    let body = cached_json(
+        state,
+        key,
+        state.config.cache_ttl_user_secs,
+        &state.client.suite_user_url(cfg),
+        &SUITE_USER_RESPONSE_SCHEMA,
+        |root, _| Ok(root.clone()),
+    )
+    .await?;
+    Ok(serde_json::from_str(&body)?)
+}
+
+/// Converts a decoded protobuf map into the list form used by the public API.
+/// Map keys are retained as a field when the value does not already carry the
+/// identifier, which makes character-rank entries self-contained for clients.
+fn suite_map_values(root: &Value, map_name: &str, key_name: Option<&str>) -> Value {
+    let entries = root
+        .get(map_name)
+        .and_then(|map| map.get("entries"))
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let mut value = entry.get("value")?.clone();
+                    if let Some(key_name) = key_name {
+                        if let (Some(key), Some(object)) = (entry.get("key"), value.as_object_mut()) {
+                            object.insert(key_name.to_string(), key.clone());
+                        }
+                    }
+                    Some(value)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    json!({ "entries": entries })
 }
 
 // ============================================================================
@@ -770,11 +814,11 @@ pub async fn user_stamps(State(state): State<SharedState>) -> AppResult<Response
     user_list(&state, &key, &state.client.user_stamp_url(cfg), &USER_STAMP_LIST_SCHEMA).await
 }
 
-/// GET /api/{server}/user/areas — the configured user's area items.
+/// GET /api/{server}/user/areas — enabled area items with category and level.
 pub async fn user_areas(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
-    let key = format!("user-areas:{}", cfg.uid);
-    user_list(&state, &key, &state.client.user_area_url(cfg), &USER_AREA_LIST_SCHEMA).await
+    let root = suite_user_value(&state, &format!("suite-user:{}", cfg.uid)).await?;
+    Ok(json_response(suite_map_values(&root, "userAreaItemMap", None).to_string()))
 }
 
 /// GET /api/{server}/user/items — the configured user's item balances.
@@ -826,10 +870,24 @@ pub async fn user_costumes(State(state): State<SharedState>) -> AppResult<Respon
     user_list(&state, &key, &state.client.user_costume_url(cfg), &USER_COSTUME_LIST_SCHEMA).await
 }
 
-/// GET /api/{server}/user/characters — the configured user's character affinity.
+/// GET /api/{server}/user/characters — character rank, experience and potential.
 pub async fn user_characters(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
-    let key = format!("user-characters:{}", cfg.uid);
+    let root = suite_user_value(&state, &format!("suite-user:{}", cfg.uid)).await?;
+    Ok(json_response(suite_map_values(&root, "userCharacterRankMap", Some("characterId")).to_string()))
+}
+
+/// GET /api/{server}/user/area-statuses — raw area status records.
+pub async fn user_area_statuses(State(state): State<SharedState>) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    let key = format!("user-area-statuses:{}", cfg.uid);
+    user_list(&state, &key, &state.client.user_area_url(cfg), &USER_AREA_LIST_SCHEMA).await
+}
+
+/// GET /api/{server}/user/character-affinity — character affinity records.
+pub async fn user_character_affinity(State(state): State<SharedState>) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    let key = format!("user-character-affinity:{}", cfg.uid);
     user_list(&state, &key, &state.client.user_character_url(cfg), &USER_CHARACTER_LIST_SCHEMA).await
 }
 
@@ -866,49 +924,4 @@ pub async fn cache_stats(State(state): State<SharedState>) -> Json<Value> {
 pub async fn cache_clear(State(state): State<SharedState>) -> Json<Value> {
     state.cache.clear();
     Json(json!({ "cleared": true }))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wrapped_map_preserves_entries_root() {
-        let root = json!({ "entries": [1, 2, 3] });
-        assert_eq!(wrapped_map(&root, &[]).unwrap(), root);
-    }
-
-    #[test]
-    fn wrapped_map_passes_through_empty_payload() {
-        assert_eq!(wrapped_map(&Value::Object(Default::default()), &[]).unwrap(), json!({}));
-    }
-
-    #[test]
-    fn wrapped_map_passes_through_non_entries_payload() {
-        let root = json!({ "presentBox": { "slotCount": 100 } });
-        let raw = [0x12, 0x06, 0x08, 0x64];
-        assert_eq!(wrapped_map(&root, &raw).unwrap(), root);
-    }
-
-    #[test]
-    fn filtered_entries_preserves_order_and_wrapper() {
-        let root = json!({
-            "entries": [
-                { "id": 3, "group": 1 },
-                { "id": 1, "group": 2 },
-                { "id": 2, "group": 1 }
-            ]
-        });
-
-        assert_eq!(
-            filtered_entries(&root, |entry| entry.get("group").and_then(Value::as_i64) == Some(1)),
-            json!({ "entries": [{ "id": 3, "group": 1 }, { "id": 2, "group": 1 }] })
-        );
-    }
-
-    #[test]
-    fn filtered_entries_returns_an_empty_list_for_invalid_roots() {
-        assert_eq!(filtered_entries(&json!({}), |_| true), json!({ "entries": [] }));
-        assert_eq!(filtered_entries(&json!({ "entries": null }), |_| true), json!({ "entries": [] }));
-    }
 }

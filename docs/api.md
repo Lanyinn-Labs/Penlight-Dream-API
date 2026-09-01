@@ -139,7 +139,7 @@ curl http://127.0.0.1:8080/api/en/music
 | GET | `/api/{server}/user/situations` | 用户持有的卡 |
 | GET | `/api/{server}/user/title` | 用户当前称号 |
 | GET | `/api/{server}/user/stamps` | 用户表情 |
-| GET | `/api/{server}/user/areas` | 用户区域道具 |
+| GET | `/api/{server}/user/areas` | 用户已启用区域道具，含 `areaItemCategory` 和 `level` |
 | GET | `/api/{server}/user/items` | 用户道具余额 |
 | GET | `/api/{server}/user/presents` | 用户礼物与礼盒信息 |
 | GET | `/api/{server}/user/gacha` | 用户卡池记录 |
@@ -147,7 +147,13 @@ curl http://127.0.0.1:8080/api/en/music
 | GET | `/api/{server}/user/missions` | 用户任务进度 |
 | GET | `/api/{server}/user/login-bonuses` | 用户登录奖励进度 |
 | GET | `/api/{server}/user/costumes` | 用户拥有的服装 |
-| GET | `/api/{server}/user/characters` | 用户角色亲密度 |
+| GET | `/api/{server}/user/characters` | 用户角色等级、经验和已释放潜力等级 |
+| GET | `/api/{server}/user/area-statuses` | 用户区域状态记录 |
+| GET | `/api/{server}/user/character-affinity` | 用户角色亲密度记录 |
+
+`user/areas` 的每个区域道具现在包含 `areaItemId`、`status`、`areaItemCategory` 和 `level`。
+`user/characters` 的每条角色记录现在包含 `characterId`、`rank`、`exp`、`addExp`、`nextExp`、
+`totalExp` 和 `releasedPotentialLevel`。
 
 ### 缓存
 
