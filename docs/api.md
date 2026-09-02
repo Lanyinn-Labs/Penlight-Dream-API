@@ -140,6 +140,9 @@ curl http://127.0.0.1:8080/api/en/music
 | GET | `/api/{server}/user/title` | 用户当前称号 |
 | GET | `/api/{server}/user/stamps` | 用户表情 |
 | GET | `/api/{server}/user/areas` | 用户已启用区域道具，含 `areaItemCategory` 和 `level` |
+| GET | `/api/{server}/user/music-scores` | 用户所有已记录的歌曲/难度成绩 |
+| GET | `/api/{server}/user/music/{music_id}/status?difficulty=expert` | 查询指定歌曲指定难度的通关、FC、AP 状态 |
+| GET | `/api/{server}/user/music-clear-info` | 按难度汇总通关、FC、AP 数量 |
 | GET | `/api/{server}/user/items` | 用户道具余额 |
 | GET | `/api/{server}/user/presents` | 用户礼物与礼盒信息 |
 | GET | `/api/{server}/user/gacha` | 用户卡池记录 |
@@ -159,6 +162,36 @@ curl http://127.0.0.1:8080/api/en/music
 其中每项包含 `characterId`、`characterBonusType`、`performance`、`technique` 和 `visual`。
 `user/character-mission-bonuses` 返回同样的明细数组，数据来自官方 Suite 用户快照的
 `userCharacterMissionBonusMap` 字段。
+
+#### 歌曲成绩与 FC/AP
+
+歌曲成绩来自官方 Suite 用户快照的 `userMusicScoreMap`。单曲状态接口的
+`difficulty` 支持 `easy`、`normal`、`hard`、`expert`、`special`，例如：
+
+```bash
+curl 'http://127.0.0.1:8080/api/jp/user/music/1/status?difficulty=expert'
+```
+
+响应示例：
+
+```json
+{
+  "musicId": 1,
+  "musicDifficulty": "expert",
+  "played": true,
+  "clearStatus": "all_perfect",
+  "isCleared": true,
+  "isFullCombo": true,
+  "isAllPerfect": true,
+  "soloHighScore": 1234567,
+  "maxCombo": 987,
+  "soloScoreRank": "sss"
+}
+```
+
+`clearStatus` 的官方值包括 `not_cleared`、`cleared`、`full_combo` 和 `all_perfect`；AP
+同时满足 FC。若该歌曲/难度没有成绩记录，接口仍返回 `200`，其中 `played`、`isCleared`、
+`isFullCombo`、`isAllPerfect` 为 `false`，成绩字段为 `null`。
 
 ### 缓存
 

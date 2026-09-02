@@ -1060,6 +1060,55 @@ pub static USER_CHARACTER_LIST_SCHEMA: Schema = Schema {
     fields: &[(1, field("entries", ProtoType::Message(&USER_CHARACTER_SCHEMA), true))],
 };
 
+/// One per-difficulty score from the complete suite user snapshot.
+pub static USER_MUSIC_SCORE_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("userId", ProtoType::Long, false)),
+        (2, field("musicId", ProtoType::Int, false)),
+        (3, field("musicDifficulty", ProtoType::String, false)),
+        (4, field("soloHighScore", ProtoType::Int, false)),
+        (5, field("maxCombo", ProtoType::Int, false)),
+        (6, field("soloScoreRank", ProtoType::String, false)),
+        (7, field("clearStatus", ProtoType::String, false)),
+    ],
+};
+
+pub static USER_MUSIC_SCORE_LIST_SCHEMA: Schema = Schema {
+    fields: &[(1, field("entries", ProtoType::Message(&USER_MUSIC_SCORE_SCHEMA), true))],
+};
+
+pub static USER_MUSIC_SCORE_MAP_ENTRY_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("key", ProtoType::Int, false)),
+        (2, field("value", ProtoType::Message(&USER_MUSIC_SCORE_LIST_SCHEMA), false)),
+    ],
+};
+
+pub static USER_MUSIC_SCORE_MAP_SCHEMA: Schema = Schema {
+    fields: &[(1, field("entries", ProtoType::Message(&USER_MUSIC_SCORE_MAP_ENTRY_SCHEMA), true))],
+};
+
+/// Aggregate clear counts grouped by difficulty. The per-song status API uses
+/// `USER_MUSIC_SCORE_SCHEMA`; this map mirrors the game's profile counters.
+pub static USER_MUSIC_CLEAR_INFO_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("clearedMusicCount", ProtoType::Int, false)),
+        (2, field("fullComboMusicCount", ProtoType::Int, false)),
+        (3, field("allPerfectMusicCount", ProtoType::Int, false)),
+    ],
+};
+
+pub static USER_MUSIC_CLEAR_INFO_MAP_ENTRY_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("key", ProtoType::String, false)),
+        (2, field("value", ProtoType::Message(&USER_MUSIC_CLEAR_INFO_SCHEMA), false)),
+    ],
+};
+
+pub static USER_MUSIC_CLEAR_INFO_MAP_SCHEMA: Schema = Schema {
+    fields: &[(1, field("entries", ProtoType::Message(&USER_MUSIC_CLEAR_INFO_MAP_ENTRY_SCHEMA), true))],
+};
+
 /// Character rank data is carried by the complete suite user snapshot.
 pub static USER_CHARACTER_RANK_SCHEMA: Schema = Schema {
     fields: &[
@@ -1159,12 +1208,22 @@ pub static USER_CHARACTER_MISSION_BONUS_MAP_SCHEMA: Schema = Schema {
 };
 
 /// The complete suite snapshot fields used by the production user APIs.
-/// Field 22 contains enabled area items, field 400 contains character ranks,
-/// field 401 contains the three-dimensional potential levels, and field 456
-/// contains character mission bonuses.
+/// Field 22 contains enabled area items, field 54 contains per-song scores,
+/// field 400 contains character ranks, field 401 contains the three-dimensional
+/// potential levels, field 409 contains aggregate music clear counts, and field
+/// 456 contains character mission bonuses.
 pub static SUITE_USER_RESPONSE_SCHEMA: Schema = Schema {
     fields: &[
         (22, field("userAreaItemMap", ProtoType::Message(&USER_AREA_ITEM_MAP_SCHEMA), false)),
+        (54, field("userMusicScoreMap", ProtoType::Message(&USER_MUSIC_SCORE_MAP_SCHEMA), false)),
+        (
+            409,
+            field(
+                "userMusicClearInfoMap",
+                ProtoType::Message(&USER_MUSIC_CLEAR_INFO_MAP_SCHEMA),
+                false,
+            ),
+        ),
         (400, field("userCharacterRankMap", ProtoType::Message(&USER_CHARACTER_RANK_MAP_SCHEMA), false)),
         (
             401,

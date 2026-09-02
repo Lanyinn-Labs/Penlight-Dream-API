@@ -219,6 +219,89 @@ fn suite_map_values(root: &Value, map_name: &str, key_name: Option<&str>) -> Val
     json!({ "entries": entries })
 }
 
+/// Flattens the suite user's music-score map into one entry per song and
+/// difficulty. The map key is copied into `musicId` when the nested score row
+/// does not contain it, which keeps the response useful for incomplete rows.
+fn suite_music_score_entries(root: &Value) -> Vec<Value> {
+    let mut result = Vec::new();
+    let map_entries = root
+        .get("userMusicScoreMap")
+        .and_then(|map| map.get("entries"))
+        .and_then(Value::as_array);
+
+    if let Some(map_entries) = map_entries {
+        for map_entry in map_entries {
+            let key = map_entry.get("key").cloned();
+            let scores = map_entry
+                .get("value")
+                .and_then(|value| value.get("entries"))
+                .and_then(Value::as_array);
+
+            if let Some(scores) = scores {
+                for score in scores {
+                    let mut score = score.clone();
+                    if score.get("musicId").is_none() {
+                        if let (Some(key), Some(object)) = (&key, score.as_object_mut()) {
+                            object.insert("musicId".to_string(), key.clone());
+                        }
+                    }
+                    result.push(score);
+                }
+            }
+        }
+    }
+
+    result
+}
+
+const MUSIC_DIFFICULTIES: [&str; 5] = ["easy", "normal", "hard", "expert", "special"];
+
+fn normalize_music_difficulty(raw: &str) -> Option<&'static str> {
+    match raw.to_ascii_lowercase().as_str() {
+        "easy" => Some("easy"),
+        "normal" => Some("normal"),
+        "hard" => Some("hard"),
+        "expert" => Some("expert"),
+        "special" => Some("special"),
+        _ => None,
+    }
+}
+
+/// Builds the single-song status response from the decoded suite snapshot.
+/// Missing rows mean that the configured user has not recorded a score for
+/// that song/difficulty; they are represented as an unplayed result rather
+/// than a 404 so callers can query arbitrary music IDs safely.
+fn suite_music_status_value(root: &Value, music_id: i64, difficulty: &str) -> Value {
+    let score = suite_music_score_entries(root)
+        .into_iter()
+        .rev()
+        .find(|entry| {
+            entry.get("musicId").and_then(Value::as_i64) == Some(music_id)
+                && entry.get("musicDifficulty").and_then(Value::as_str) == Some(difficulty)
+        });
+    let clear_status = score
+        .as_ref()
+        .and_then(|entry| entry.get("clearStatus"))
+        .and_then(Value::as_str)
+        .unwrap_or("not_cleared");
+    let is_cleared = matches!(clear_status, "cleared" | "full_combo" | "all_perfect");
+    let is_full_combo = matches!(clear_status, "full_combo" | "all_perfect");
+    let is_all_perfect = clear_status == "all_perfect";
+
+    json!({
+        "musicId": music_id,
+        "musicDifficulty": difficulty,
+        "played": score.is_some(),
+        "clearStatus": clear_status,
+        "isCleared": is_cleared,
+        "isFullCombo": is_full_combo,
+        "isAllPerfect": is_all_perfect,
+        "soloHighScore": score.as_ref().and_then(|entry| entry.get("soloHighScore")).cloned(),
+        "maxCombo": score.as_ref().and_then(|entry| entry.get("maxCombo")).cloned(),
+        "soloScoreRank": score.as_ref().and_then(|entry| entry.get("soloScoreRank")).cloned(),
+    })
+}
+
 /// Flattens the character-mission-bonus map into public API entries.
 fn suite_character_mission_bonus_entries(root: &Value) -> Vec<Value> {
     let mut result = Vec::new();
@@ -904,6 +987,54 @@ pub async fn user_areas(State(state): State<SharedState>) -> AppResult<Response>
     Ok(json_response(suite_map_values(&root, "userAreaItemMap", None).to_string()))
 }
 
+/// GET /api/{server}/user/music-scores — all recorded per-song scores.
+pub async fn user_music_scores(State(state): State<SharedState>) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    let root = suite_user_value(&state, &format!("suite-user:{}", cfg.uid)).await?;
+    Ok(json_response(json!({ "entries": suite_music_score_entries(&root) }).to_string()))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UserMusicStatusQuery {
+    /// One of `easy`, `normal`, `hard`, `expert`, or `special`.
+    pub difficulty: Option<String>,
+}
+
+/// GET /api/{server}/user/music/{music_id}/status — clear/FC/AP status for a
+/// particular song difficulty.
+pub async fn user_music_status(
+    State(state): State<SharedState>,
+    Path((_server, music_id)): Path<(String, i64)>,
+    Query(query): Query<UserMusicStatusQuery>,
+) -> AppResult<Response> {
+    if music_id < 1 {
+        return Err(AppError::bad_request("musicId must be >= 1"));
+    }
+
+    let raw_difficulty = query
+        .difficulty
+        .as_deref()
+        .ok_or_else(|| AppError::bad_request("difficulty is required"))?;
+    let difficulty = normalize_music_difficulty(raw_difficulty).ok_or_else(|| {
+        AppError::bad_request(format!(
+            "unsupported difficulty \"{raw_difficulty}\", supported: {}",
+            MUSIC_DIFFICULTIES.join(", ")
+        ))
+    })?;
+
+    let cfg = jp_config(&state)?;
+    let root = suite_user_value(&state, &format!("suite-user:{}", cfg.uid)).await?;
+    Ok(json_response(suite_music_status_value(&root, music_id, difficulty).to_string()))
+}
+
+/// GET /api/{server}/user/music-clear-info — aggregate clear/FC/AP counts by
+/// difficulty from the same official suite snapshot.
+pub async fn user_music_clear_info(State(state): State<SharedState>) -> AppResult<Response> {
+    let cfg = jp_config(&state)?;
+    let root = suite_user_value(&state, &format!("suite-user:{}", cfg.uid)).await?;
+    Ok(json_response(suite_map_values(&root, "userMusicClearInfoMap", Some("difficulty")).to_string()))
+}
+
 /// GET /api/{server}/user/items — the configured user's item balances.
 pub async fn user_items(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
@@ -1014,4 +1145,80 @@ pub async fn cache_stats(State(state): State<SharedState>) -> Json<Value> {
 pub async fn cache_clear(State(state): State<SharedState>) -> Json<Value> {
     state.cache.clear();
     Json(json!({ "cleared": true }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{suite_music_score_entries, suite_music_status_value};
+    use serde_json::json;
+
+    #[test]
+    fn music_status_reports_ap_as_fc_and_ap() {
+        let root = json!({
+            "userMusicScoreMap": {
+                "entries": [{
+                    "key": 123,
+                    "value": {
+                        "entries": [{
+                            "musicId": 123,
+                            "musicDifficulty": "expert",
+                            "soloHighScore": 1234567,
+                            "maxCombo": 987,
+                            "soloScoreRank": "sss",
+                            "clearStatus": "all_perfect"
+                        }]
+                    }
+                }]
+            }
+        });
+
+        let status = suite_music_status_value(&root, 123, "expert");
+        assert_eq!(status["played"], json!(true));
+        assert_eq!(status["isCleared"], json!(true));
+        assert_eq!(status["isFullCombo"], json!(true));
+        assert_eq!(status["isAllPerfect"], json!(true));
+        assert_eq!(status["soloHighScore"], json!(1234567));
+    }
+
+    #[test]
+    fn music_status_defaults_when_difficulty_has_no_record() {
+        let root = json!({
+            "userMusicScoreMap": {
+                "entries": [{
+                    "key": 123,
+                    "value": {
+                        "entries": [{
+                            "musicId": 123,
+                            "musicDifficulty": "hard",
+                            "clearStatus": "full_combo"
+                        }]
+                    }
+                }]
+            }
+        });
+
+        let status = suite_music_status_value(&root, 123, "expert");
+        assert_eq!(status["played"], json!(false));
+        assert_eq!(status["clearStatus"], json!("not_cleared"));
+        assert_eq!(status["isFullCombo"], json!(false));
+        assert_eq!(status["soloHighScore"], json!(null));
+    }
+
+    #[test]
+    fn music_score_map_is_flattened() {
+        let root = json!({
+            "userMusicScoreMap": {
+                "entries": [{
+                    "key": 456,
+                    "value": {
+                        "entries": [{"musicDifficulty": "special"}]
+                    }
+                }]
+            }
+        });
+
+        let entries = suite_music_score_entries(&root);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["musicId"], json!(456));
+    }
 }
