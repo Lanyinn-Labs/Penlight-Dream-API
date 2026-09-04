@@ -3,6 +3,27 @@
 
 use super::schema::{field, ProtoType, Schema};
 
+/// Declares the ubiquitous protobuf `entries: repeated Message` wrapper.
+macro_rules! list_schema {
+    ($name:ident => $entry:ident) => {
+        pub static $name: Schema = Schema {
+            fields: &[(1, field("entries", ProtoType::Message(&$entry), true))],
+        };
+    };
+}
+
+/// Declares protobuf's encoded key/value entry used by map fields.
+macro_rules! map_entry_schema {
+    ($name:ident => $key_type:ident, $value:ident) => {
+        pub static $name: Schema = Schema {
+            fields: &[
+                (1, field("key", ProtoType::$key_type, false)),
+                (2, field("value", ProtoType::Message(&$value), false)),
+            ],
+        };
+    };
+}
+
 // ============================================================================
 // Ranking user, shared by monthly and event rankings
 // ============================================================================
@@ -50,14 +71,15 @@ pub static USER_SITUATION_SCHEMA: Schema = Schema {
         (9, field("illust", ProtoType::String, false)),
         (10, field("skillExp", ProtoType::Int, false)),
         (11, field("skillLevel", ProtoType::Int, false)),
-        (12, field("userAppendParameter", ProtoType::Message(&USER_APPEND_PARAMETER_SCHEMA), false)),
+        (
+            12,
+            field("userAppendParameter", ProtoType::Message(&USER_APPEND_PARAMETER_SCHEMA), false),
+        ),
         (13, field("limitBreakRank", ProtoType::Int, false)),
     ],
 };
 
-pub static USER_SITUATION_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_SITUATION_SCHEMA), true))],
-};
+list_schema!(USER_SITUATION_LIST_SCHEMA => USER_SITUATION_SCHEMA);
 
 pub static USER_PROFILE_SITUATION_SCHEMA: Schema = Schema {
     fields: &[
@@ -76,17 +98,9 @@ pub static USER_PROFILE_DEGREE_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_PROFILE_DEGREE_MAP_ENTRY_SCHEMA: Schema = Schema {
-    fields: &[
-        (1, field("key", ProtoType::String, false)),
-        (2, field("value", ProtoType::Message(&USER_PROFILE_DEGREE_SCHEMA), false)),
-    ],
-};
+map_entry_schema!(USER_PROFILE_DEGREE_MAP_ENTRY_SCHEMA => String, USER_PROFILE_DEGREE_SCHEMA);
 
-/// Map fields are encoded as repeated nested K-V messages.
-pub static USER_PROFILE_DEGREE_MAP_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_PROFILE_DEGREE_MAP_ENTRY_SCHEMA), true))],
-};
+list_schema!(USER_PROFILE_DEGREE_MAP_SCHEMA => USER_PROFILE_DEGREE_MAP_ENTRY_SCHEMA);
 
 pub static RANKING_USER_SCHEMA: Schema = Schema {
     fields: &[
@@ -99,15 +113,22 @@ pub static RANKING_USER_SCHEMA: Schema = Schema {
         (7, field("userId", ProtoType::Int, false)),
         (8, field("degreeId", ProtoType::Int, false)),
         (9, field("userDeck", ProtoType::Message(&USER_DECK_SCHEMA), false)),
-        (10, field("userSituationList", ProtoType::Message(&USER_SITUATION_LIST_SCHEMA), false)),
-        (11, field("userProfileSituation", ProtoType::Message(&USER_PROFILE_SITUATION_SCHEMA), false)),
-        (12, field("userProfileDegreeMap", ProtoType::Message(&USER_PROFILE_DEGREE_MAP_SCHEMA), false)),
+        (
+            10,
+            field("userSituationList", ProtoType::Message(&USER_SITUATION_LIST_SCHEMA), false),
+        ),
+        (
+            11,
+            field("userProfileSituation", ProtoType::Message(&USER_PROFILE_SITUATION_SCHEMA), false),
+        ),
+        (
+            12,
+            field("userProfileDegreeMap", ProtoType::Message(&USER_PROFILE_DEGREE_MAP_SCHEMA), false),
+        ),
     ],
 };
 
-pub static RANKING_USER_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&RANKING_USER_SCHEMA), true))],
-};
+list_schema!(RANKING_USER_LIST_SCHEMA => RANKING_USER_SCHEMA);
 
 // ============================================================================
 // Monthly ranking
@@ -115,9 +136,22 @@ pub static RANKING_USER_LIST_SCHEMA: Schema = Schema {
 
 pub static USER_MONTHLY_RANKING_RANKING_RESPONSE_SCHEMA: Schema = Schema {
     fields: &[
-        (1, field("monthlyRankingPointNearUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
-        (2, field("monthlyRankingPointTopUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
-        (3, field("monthlyRankingPointBorderUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
+        (
+            1,
+            field("monthlyRankingPointNearUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false),
+        ),
+        (
+            2,
+            field("monthlyRankingPointTopUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false),
+        ),
+        (
+            3,
+            field(
+                "monthlyRankingPointBorderUsers",
+                ProtoType::Message(&RANKING_USER_LIST_SCHEMA),
+                false,
+            ),
+        ),
     ],
 };
 
@@ -162,14 +196,15 @@ pub static MASTER_MONTHLY_RANKING_SCHEMA: Schema = Schema {
         (12, field("distributionEndAt", ProtoType::Long, false)),
         (13, field("receptionEndAt", ProtoType::Long, false)),
         (14, field("aggregateEndAt", ProtoType::Long, false)),
-        (101, field("rewards", ProtoType::Message(&MASTER_MONTHLY_RANKING_REWARD_SCHEMA), true)),
+        (
+            101,
+            field("rewards", ProtoType::Message(&MASTER_MONTHLY_RANKING_REWARD_SCHEMA), true),
+        ),
         (102, field("grades", ProtoType::Message(&MASTER_MONTHLY_RANKING_GRADE_SCHEMA), true)),
     ],
 };
 
-pub static MASTER_MONTHLY_RANKING_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&MASTER_MONTHLY_RANKING_SCHEMA), true))],
-};
+list_schema!(MASTER_MONTHLY_RANKING_LIST_SCHEMA => MASTER_MONTHLY_RANKING_SCHEMA);
 
 // ============================================================================
 // Event ranking, one response schema per event type
@@ -177,11 +212,17 @@ pub static MASTER_MONTHLY_RANKING_LIST_SCHEMA: Schema = Schema {
 
 pub static USER_MEDLEY_EVENT_RANKING_RESPONSE_SCHEMA: Schema = Schema {
     fields: &[
-        (1, field("eventPointNearUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
+        (
+            1,
+            field("eventPointNearUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false),
+        ),
         (2, field("eventPointTopUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
         (3, field("scoreNearUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
         (4, field("scoreTopUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
-        (5, field("eventPointBorderUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
+        (
+            5,
+            field("eventPointBorderUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false),
+        ),
         (6, field("scoreBorderUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
     ],
 };
@@ -190,7 +231,10 @@ pub static USER_LIVE_TRY_EVENT_RANKING_RESPONSE_SCHEMA: Schema = Schema {
     fields: &[
         (1, field("nearUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
         (2, field("topUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
-        (3, field("eventPointBorderUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
+        (
+            3,
+            field("eventPointBorderUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false),
+        ),
     ],
 };
 
@@ -212,10 +256,23 @@ pub static USER_CHALLENGE_MUSIC_RANKING_RESPONSE_SCHEMA: Schema = Schema {
 
 pub static USER_CHALLENGE_EVENT_RANKING_RESPONSE_SCHEMA: Schema = Schema {
     fields: &[
-        (1, field("eventPointNearUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
+        (
+            1,
+            field("eventPointNearUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false),
+        ),
         (2, field("eventPointTopUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
-        (3, field("eventPointBorderUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
-        (101, field("challengeMusicRankings", ProtoType::Message(&USER_CHALLENGE_MUSIC_RANKING_RESPONSE_SCHEMA), true)),
+        (
+            3,
+            field("eventPointBorderUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false),
+        ),
+        (
+            101,
+            field(
+                "challengeMusicRankings",
+                ProtoType::Message(&USER_CHALLENGE_MUSIC_RANKING_RESPONSE_SCHEMA),
+                true,
+            ),
+        ),
     ],
 };
 
@@ -231,7 +288,10 @@ pub static USER_TEAM_LIVE_FESTIVAL_EVENT_RANKING_RESPONSE_SCHEMA: Schema = Schem
     fields: &[
         (1, field("nearUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
         (2, field("topUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
-        (3, field("eventPointBorderUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
+        (
+            3,
+            field("eventPointBorderUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false),
+        ),
     ],
 };
 
@@ -246,10 +306,23 @@ pub static USER_VERSUS_MUSIC_RANKING_RESPONSE_SCHEMA: Schema = Schema {
 
 pub static USER_VERSUS_EVENT_RANKING_RESPONSE_SCHEMA: Schema = Schema {
     fields: &[
-        (1, field("eventPointNearUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
+        (
+            1,
+            field("eventPointNearUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false),
+        ),
         (2, field("eventPointTopUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
-        (3, field("versusMusicRankings", ProtoType::Message(&USER_VERSUS_MUSIC_RANKING_RESPONSE_SCHEMA), true)),
-        (4, field("eventPointBorderUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false)),
+        (
+            3,
+            field(
+                "versusMusicRankings",
+                ProtoType::Message(&USER_VERSUS_MUSIC_RANKING_RESPONSE_SCHEMA),
+                true,
+            ),
+        ),
+        (
+            4,
+            field("eventPointBorderUsers", ProtoType::Message(&RANKING_USER_LIST_SCHEMA), false),
+        ),
     ],
 };
 
@@ -312,14 +385,18 @@ pub static MASTER_EVENT_SCHEMA: Schema = Schema {
         (15, field("eventExchangesEndAt", ProtoType::Long, false)),
         (16, field("receptionEndAt", ProtoType::Long, false)),
         (18, field("previousEventId", ProtoType::Int, false)),
-        (101, field("pointRewards", ProtoType::Message(&MASTER_EVENT_POINT_REWARD_SCHEMA), true)),
-        (102, field("rankingRewards", ProtoType::Message(&MASTER_EVENT_RANKING_REWARD_SCHEMA), true)),
+        (
+            101,
+            field("pointRewards", ProtoType::Message(&MASTER_EVENT_POINT_REWARD_SCHEMA), true),
+        ),
+        (
+            102,
+            field("rankingRewards", ProtoType::Message(&MASTER_EVENT_RANKING_REWARD_SCHEMA), true),
+        ),
     ],
 };
 
-pub static MASTER_EVENT_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&MASTER_EVENT_SCHEMA), true))],
-};
+list_schema!(MASTER_EVENT_LIST_SCHEMA => MASTER_EVENT_SCHEMA);
 
 // ============================================================================
 // Application
@@ -345,7 +422,10 @@ pub static APPLICATION_SCHEMA: Schema = Schema {
         (9, field("shopStatus", ProtoType::String, false)),
         (10, field("masterVersion", ProtoType::String, false)),
         (11, field("checksum", ProtoType::String, false)),
-        (12, field("platformMaintenance", ProtoType::Message(&APPLICATION_PLATFORM_STATUS_SCHEMA), true)),
+        (
+            12,
+            field("platformMaintenance", ProtoType::Message(&APPLICATION_PLATFORM_STATUS_SCHEMA), true),
+        ),
     ],
 };
 
@@ -387,9 +467,251 @@ pub static MUSIC_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static MUSIC_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&MUSIC_SCHEMA), true))],
+list_schema!(MUSIC_LIST_SCHEMA => MUSIC_SCHEMA);
+
+// ============================================================================
+// Song difficulty and live difficulty master data
+// ============================================================================
+
+/// Score thresholds and chart metadata for one song/difficulty pair.
+pub static MUSIC_MULTI_LIVE_SCORE_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("musicId", ProtoType::Int, false)),
+        (2, field("musicDifficulty", ProtoType::String, false)),
+        (3, field("multiLiveDifficultyId", ProtoType::Int, false)),
+        (4, field("scoreS", ProtoType::Int, false)),
+        (5, field("scoreA", ProtoType::Int, false)),
+        (6, field("scoreB", ProtoType::Int, false)),
+        (7, field("scoreC", ProtoType::Int, false)),
+        (8, field("multiLiveDifficultyType", ProtoType::String, false)),
+        (9, field("scoreSS", ProtoType::Int, false)),
+        (10, field("scoreSSS", ProtoType::Int, false)),
+    ],
 };
+
+map_entry_schema!(MUSIC_MULTI_LIVE_SCORE_MAP_ENTRY_SCHEMA => Int, MUSIC_MULTI_LIVE_SCORE_SCHEMA);
+
+pub static MUSIC_DIFFICULTY_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("musicId", ProtoType::Int, false)),
+        (2, field("difficulty", ProtoType::String, false)),
+        (3, field("playLevel", ProtoType::Int, false)),
+        (
+            4,
+            field(
+                "multiLiveScoreMap",
+                ProtoType::Message(&MUSIC_MULTI_LIVE_SCORE_MAP_ENTRY_SCHEMA),
+                true,
+            ),
+        ),
+        (5, field("notesQuantity", ProtoType::Int, false)),
+        (6, field("scoreS", ProtoType::Int, false)),
+        (7, field("scoreA", ProtoType::Int, false)),
+        (8, field("scoreB", ProtoType::Int, false)),
+        (9, field("scoreC", ProtoType::Int, false)),
+        (10, field("scoreSS", ProtoType::Int, false)),
+        (11, field("scoreSSS", ProtoType::Int, false)),
+        (12, field("enableSpecialNotes", ProtoType::Int, false)),
+    ],
+};
+
+list_schema!(MUSIC_DIFFICULTY_LIST_SCHEMA => MUSIC_DIFFICULTY_SCHEMA);
+
+pub static MULTI_LIVE_DIFFICULTY_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("id", ProtoType::Int, false)),
+        (2, field("difficulty", ProtoType::String, false)),
+        (3, field("requiredTotalParam", ProtoType::Int, false)),
+        (4, field("bonusRate", ProtoType::Float, false)),
+        (5, field("seq", ProtoType::Int, false)),
+        (6, field("multiLiveDifficultyType", ProtoType::String, false)),
+        (7, field("matchingLogicId", ProtoType::Int, false)),
+        (8, field("roomName", ProtoType::String, false)),
+        (9, field("requiredColorCode", ProtoType::String, false)),
+    ],
+};
+
+map_entry_schema!(MULTI_LIVE_DIFFICULTY_MAP_ENTRY_SCHEMA => Int, MULTI_LIVE_DIFFICULTY_SCHEMA);
+
+list_schema!(MULTI_LIVE_DIFFICULTY_MAP_SCHEMA => MULTI_LIVE_DIFFICULTY_MAP_ENTRY_SCHEMA);
+
+pub static WEEKLY_MULTI_LIVE_DIFFICULTY_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("id", ProtoType::Int, false)),
+        (2, field("difficulty", ProtoType::String, false)),
+        (3, field("requiredTotalParam", ProtoType::Int, false)),
+        (4, field("bonusRate", ProtoType::Float, false)),
+        (5, field("seq", ProtoType::Int, false)),
+        (6, field("dayOfWeek", ProtoType::Int, false)),
+        (7, field("description", ProtoType::String, false)),
+        (8, field("resourceName", ProtoType::String, false)),
+        (9, field("multiLiveDifficultyType", ProtoType::String, false)),
+        (10, field("matchingLogicId", ProtoType::Int, false)),
+    ],
+};
+
+map_entry_schema!(WEEKLY_MULTI_LIVE_DIFFICULTY_MAP_ENTRY_SCHEMA => Int, WEEKLY_MULTI_LIVE_DIFFICULTY_SCHEMA);
+
+list_schema!(WEEKLY_MULTI_LIVE_DIFFICULTY_MAP_SCHEMA => WEEKLY_MULTI_LIVE_DIFFICULTY_MAP_ENTRY_SCHEMA);
+
+// ============================================================================
+// Area, bond, action, and exchange master data
+// ============================================================================
+
+pub static AREA_ITEM_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("areaItemId", ProtoType::Int, false)),
+        (2, field("categoryId", ProtoType::Int, false)),
+        (3, field("level", ProtoType::Int, false)),
+        (4, field("areaItemName", ProtoType::String, false)),
+        (5, field("areaId", ProtoType::Int, false)),
+        (6, field("spawnPoint", ProtoType::String, false)),
+        (7, field("life", ProtoType::Int, false)),
+        (8, field("performance", ProtoType::Float, false)),
+        (9, field("technique", ProtoType::Float, false)),
+        (10, field("visual", ProtoType::Float, false)),
+        (11, field("valueType", ProtoType::String, false)),
+        (12, field("targetAttributes", ProtoType::String, true)),
+        (13, field("resourceId", ProtoType::Int, false)),
+        (14, field("description", ProtoType::String, false)),
+        (15, field("characterIds", ProtoType::Int, true)),
+        (16, field("targetBandIds", ProtoType::Int, true)),
+        (17, field("flavorText", ProtoType::String, false)),
+        (18, field("seq", ProtoType::Int, false)),
+        (19, field("areaItemCategoryType", ProtoType::String, false)),
+    ],
+};
+
+map_entry_schema!(AREA_ITEM_MAP_ENTRY_SCHEMA => Int, AREA_ITEM_SCHEMA);
+
+list_schema!(AREA_ITEM_MAP_SCHEMA => AREA_ITEM_MAP_ENTRY_SCHEMA);
+
+pub static AREA_ITEM_SPAWN_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("spawnPoint", ProtoType::String, false)),
+        (2, field("spawnName", ProtoType::String, false)),
+        (3, field("seq", ProtoType::Int, false)),
+        (4, field("areaId", ProtoType::Int, false)),
+        (5, field("inject", ProtoType::String, false)),
+        (6, field("showUnsetObjectFlg", ProtoType::Int, false)),
+    ],
+};
+
+map_entry_schema!(AREA_ITEM_SPAWN_MAP_ENTRY_SCHEMA => String, AREA_ITEM_SPAWN_SCHEMA);
+
+list_schema!(AREA_ITEM_SPAWN_MAP_SCHEMA => AREA_ITEM_SPAWN_MAP_ENTRY_SCHEMA);
+
+pub static BONDS_LEVEL_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("bondsId", ProtoType::Int, false)),
+        (2, field("level", ProtoType::Int, false)),
+        (3, field("bondsName", ProtoType::String, false)),
+        (4, field("bondsEffectId", ProtoType::Int, false)),
+    ],
+};
+
+map_entry_schema!(BONDS_LEVEL_MAP_ENTRY_SCHEMA => Int, BONDS_LEVEL_SCHEMA);
+
+pub static BONDS_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("bondsId", ProtoType::Int, false)),
+        (2, field("description", ProtoType::String, false)),
+        (3, field("tag", ProtoType::String, false)),
+        (4, field("characters", ProtoType::Int, true)),
+        (5, field("bondsLevel", ProtoType::Message(&BONDS_LEVEL_MAP_ENTRY_SCHEMA), true)),
+    ],
+};
+
+map_entry_schema!(BONDS_MAP_ENTRY_SCHEMA => Int, BONDS_SCHEMA);
+
+list_schema!(BONDS_MAP_SCHEMA => BONDS_MAP_ENTRY_SCHEMA);
+
+pub static BONDS_EFFECT_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("bondsEffectId", ProtoType::Int, false)),
+        (2, field("bondsEffectName", ProtoType::String, false)),
+        (3, field("description", ProtoType::String, false)),
+        (4, field("bondsId", ProtoType::Int, false)),
+        (5, field("level", ProtoType::Int, false)),
+        (6, field("valueType", ProtoType::String, false)),
+        (7, field("life", ProtoType::Int, false)),
+        (8, field("performance", ProtoType::Int, false)),
+        (9, field("technique", ProtoType::Int, false)),
+        (10, field("visual", ProtoType::Int, false)),
+        (11, field("skillEffect", ProtoType::Int, false)),
+        (12, field("scope", ProtoType::String, false)),
+        (13, field("targetCharacters", ProtoType::Int, true)),
+    ],
+};
+
+map_entry_schema!(BONDS_EFFECT_MAP_ENTRY_SCHEMA => Int, BONDS_EFFECT_SCHEMA);
+
+list_schema!(BONDS_EFFECT_MAP_SCHEMA => BONDS_EFFECT_MAP_ENTRY_SCHEMA);
+
+pub static ACTION_SET_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("actionSetId", ProtoType::Int, false)),
+        (2, field("areaId", ProtoType::Int, false)),
+        (3, field("characterIds", ProtoType::Int, true)),
+        (4, field("actionSetType", ProtoType::String, false)),
+        (5, field("areaItemId", ProtoType::Int, false)),
+        (6, field("areaName", ProtoType::String, false)),
+        (7, field("seasonSpecialId", ProtoType::Int, false)),
+        (8, field("balloonText", ProtoType::String, false)),
+        (9, field("startSeason", ProtoType::String, false)),
+        (10, field("endSeason", ProtoType::String, false)),
+    ],
+};
+
+map_entry_schema!(ACTION_SET_MAP_ENTRY_SCHEMA => Int, ACTION_SET_SCHEMA);
+
+list_schema!(ACTION_SET_MAP_SCHEMA => ACTION_SET_MAP_ENTRY_SCHEMA);
+
+pub static PLAYER_RESOURCE_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("resourceId", ProtoType::Int, false)),
+        (2, field("resourceType", ProtoType::String, false)),
+        (3, field("quantity", ProtoType::Int, false)),
+        (4, field("lbBonus", ProtoType::Int, false)),
+        (5, field("firstGet", ProtoType::Bool, false)),
+        (6, field("duplicatedCount", ProtoType::Int, false)),
+    ],
+};
+
+list_schema!(PLAYER_RESOURCE_LIST_SCHEMA => PLAYER_RESOURCE_SCHEMA);
+
+pub static MUSIC_SHOP_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("musicShopId", ProtoType::Int, false)),
+        (2, field("shopId", ProtoType::Int, false)),
+        (3, field("shopCategory", ProtoType::String, false)),
+        (4, field("seq", ProtoType::Int, false)),
+        (5, field("musicId", ProtoType::Int, false)),
+        (6, field("amount", ProtoType::Int, false)),
+        (7, field("costs", ProtoType::Message(&PLAYER_RESOURCE_LIST_SCHEMA), false)),
+    ],
+};
+
+map_entry_schema!(MUSIC_SHOP_MAP_ENTRY_SCHEMA => Int, MUSIC_SHOP_SCHEMA);
+
+list_schema!(MUSIC_SHOP_MAP_SCHEMA => MUSIC_SHOP_MAP_ENTRY_SCHEMA);
+
+pub static DEGREE_SCHEMA: Schema = Schema {
+    fields: &[
+        (1, field("degreeId", ProtoType::Int, false)),
+        (2, field("seq", ProtoType::Int, false)),
+        (3, field("baseImageName", ProtoType::String, false)),
+        (4, field("rank", ProtoType::String, false)),
+        (5, field("degreeName", ProtoType::String, false)),
+        (6, field("degreeType", ProtoType::String, false)),
+        (7, field("iconImageName", ProtoType::String, false)),
+        (8, field("description", ProtoType::String, false)),
+    ],
+};
+
+map_entry_schema!(DEGREE_MAP_ENTRY_SCHEMA => Int, DEGREE_SCHEMA);
+
+list_schema!(DEGREE_MAP_SCHEMA => DEGREE_MAP_ENTRY_SCHEMA);
 
 // ============================================================================
 // Character
@@ -426,9 +748,7 @@ pub static CHARACTER_COSTUME_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static CHARACTER_COSTUME_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&CHARACTER_COSTUME_SCHEMA), true))],
-};
+list_schema!(CHARACTER_COSTUME_LIST_SCHEMA => CHARACTER_COSTUME_SCHEMA);
 
 pub static CHARACTER_COSTUME_SEASON_SCHEMA: Schema = Schema {
     fields: &[
@@ -482,17 +802,21 @@ pub static CHARACTER_SCHEMA: Schema = Schema {
         (10, field("resourceName", ProtoType::String, false)),
         (11, field("index", ProtoType::Int, false)),
         (12, field("profile", ProtoType::Message(&CHARACTER_PROFILE_SCHEMA), false)),
-        (13, field("costumeSeasons", ProtoType::Message(&CHARACTER_COSTUME_SEASON_ENTRY_SCHEMA), true)),
+        (
+            13,
+            field("costumeSeasons", ProtoType::Message(&CHARACTER_COSTUME_SEASON_ENTRY_SCHEMA), true),
+        ),
         (14, field("episodes", ProtoType::Message(&CHARACTER_EPISODE_ENTRY_SCHEMA), true)),
         (16, field("color", ProtoType::String, false)),
-        (17, field("live2dCostumes", ProtoType::Message(&CHARACTER_LIVE2D_ENTRY_SCHEMA), true)),
+        (
+            17,
+            field("live2dCostumes", ProtoType::Message(&CHARACTER_LIVE2D_ENTRY_SCHEMA), true),
+        ),
         (20, field("attribute", ProtoType::String, false)),
     ],
 };
 
-pub static CHARACTER_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&CHARACTER_SCHEMA), true))],
-};
+list_schema!(CHARACTER_LIST_SCHEMA => CHARACTER_SCHEMA);
 
 // ============================================================================
 // Band
@@ -516,9 +840,7 @@ pub static BAND_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static BAND_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&BAND_SCHEMA), true))],
-};
+list_schema!(BAND_LIST_SCHEMA => BAND_SCHEMA);
 
 // ============================================================================
 // Area
@@ -536,9 +858,7 @@ pub static AREA_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static AREA_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&AREA_SCHEMA), true))],
-};
+list_schema!(AREA_LIST_SCHEMA => AREA_SCHEMA);
 
 // ============================================================================
 // Gacha
@@ -589,9 +909,7 @@ pub static GACHA_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static GACHA_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&GACHA_SCHEMA), true))],
-};
+list_schema!(GACHA_LIST_SCHEMA => GACHA_SCHEMA);
 
 // ============================================================================
 // Item
@@ -607,9 +925,7 @@ pub static ITEM_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static ITEM_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&ITEM_SCHEMA), true))],
-};
+list_schema!(ITEM_LIST_SCHEMA => ITEM_SCHEMA);
 
 // ============================================================================
 // Skill
@@ -626,9 +942,7 @@ pub static SKILL_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static SKILL_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&SKILL_SCHEMA), true))],
-};
+list_schema!(SKILL_LIST_SCHEMA => SKILL_SCHEMA);
 
 // ============================================================================
 // Stamp
@@ -645,9 +959,7 @@ pub static STAMP_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static STAMP_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&STAMP_SCHEMA), true))],
-};
+list_schema!(STAMP_LIST_SCHEMA => STAMP_SCHEMA);
 
 // ============================================================================
 // Login bonus
@@ -678,9 +990,7 @@ pub static LOGIN_BONUS_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static LOGIN_BONUS_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&LOGIN_BONUS_SCHEMA), true))],
-};
+list_schema!(LOGIN_BONUS_LIST_SCHEMA => LOGIN_BONUS_SCHEMA);
 
 // ============================================================================
 // Costume
@@ -699,9 +1009,7 @@ pub static COSTUME_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static COSTUME_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&COSTUME_SCHEMA), true))],
-};
+list_schema!(COSTUME_LIST_SCHEMA => COSTUME_SCHEMA);
 
 // ============================================================================
 // Situation master, the game's name for cards
@@ -720,7 +1028,10 @@ pub static SITUATION_APPEND_PARAMETER_SCHEMA: Schema = Schema {
 pub static SITUATION_LEVEL_SCHEMA: Schema = Schema {
     fields: &[
         (1, field("level", ProtoType::Int, false)),
-        (2, field("appendParameter", ProtoType::Message(&SITUATION_APPEND_PARAMETER_SCHEMA), false)),
+        (
+            2,
+            field("appendParameter", ProtoType::Message(&SITUATION_APPEND_PARAMETER_SCHEMA), false),
+        ),
     ],
 };
 
@@ -736,9 +1047,7 @@ pub static SITUATION_EPISODE_REWARD_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static SITUATION_EPISODE_REWARD_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&SITUATION_EPISODE_REWARD_SCHEMA), true))],
-};
+list_schema!(SITUATION_EPISODE_REWARD_LIST_SCHEMA => SITUATION_EPISODE_REWARD_SCHEMA);
 
 /// A card episode, either standard or memorial. Fields 5-7 are the stat
 /// bonuses the episode grants; fields 9 and 10 are its item and star reward
@@ -753,16 +1062,20 @@ pub static SITUATION_EPISODE_SCHEMA: Schema = Schema {
         (6, field("bonusTechnique", ProtoType::Int, false)),
         (7, field("bonusVisual", ProtoType::Int, false)),
         (8, field("maxLevel", ProtoType::Int, false)),
-        (9, field("rewards", ProtoType::Message(&SITUATION_EPISODE_REWARD_LIST_SCHEMA), false)),
-        (10, field("starRewards", ProtoType::Message(&SITUATION_EPISODE_REWARD_LIST_SCHEMA), false)),
+        (
+            9,
+            field("rewards", ProtoType::Message(&SITUATION_EPISODE_REWARD_LIST_SCHEMA), false),
+        ),
+        (
+            10,
+            field("starRewards", ProtoType::Message(&SITUATION_EPISODE_REWARD_LIST_SCHEMA), false),
+        ),
         (11, field("episodeName", ProtoType::String, false)),
         (12, field("releaseFlg", ProtoType::Int, false)),
     ],
 };
 
-pub static SITUATION_EPISODE_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&SITUATION_EPISODE_SCHEMA), true))],
-};
+list_schema!(SITUATION_EPISODE_LIST_SCHEMA => SITUATION_EPISODE_SCHEMA);
 
 /// Special-training data present on cards that can be trained. Fields 4-6
 /// are the stat bonuses granted and field 7 the item rewards; the official
@@ -775,7 +1088,10 @@ pub static SITUATION_TRAINING_SCHEMA: Schema = Schema {
         (4, field("performance", ProtoType::Int, false)),
         (5, field("technique", ProtoType::Int, false)),
         (6, field("visual", ProtoType::Int, false)),
-        (7, field("rewards", ProtoType::Message(&SITUATION_EPISODE_REWARD_LIST_SCHEMA), false)),
+        (
+            7,
+            field("rewards", ProtoType::Message(&SITUATION_EPISODE_REWARD_LIST_SCHEMA), false),
+        ),
     ],
 };
 
@@ -803,9 +1119,7 @@ pub static SITUATION_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static SITUATION_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&SITUATION_SCHEMA), true))],
-};
+list_schema!(SITUATION_LIST_SCHEMA => SITUATION_SCHEMA);
 
 // ============================================================================
 // Shop
@@ -823,9 +1137,7 @@ pub static SHOP_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static SHOP_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&SHOP_SCHEMA), true))],
-};
+list_schema!(SHOP_LIST_SCHEMA => SHOP_SCHEMA);
 
 // ============================================================================
 // User profile, deck, situation
@@ -869,9 +1181,7 @@ pub static USER_PROFILE_RESPONSE_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_DECK_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_DECK_SCHEMA), true))],
-};
+list_schema!(USER_DECK_LIST_SCHEMA => USER_DECK_SCHEMA);
 
 // ============================================================================
 // User title, stamps, areas, items, presents, gacha
@@ -901,9 +1211,7 @@ pub static USER_STAMP_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_STAMP_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_STAMP_SCHEMA), true))],
-};
+list_schema!(USER_STAMP_LIST_SCHEMA => USER_STAMP_SCHEMA);
 
 pub static USER_AREA_STATUS_ITEM_SCHEMA: Schema = Schema {
     fields: &[
@@ -919,9 +1227,7 @@ pub static USER_AREA_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_AREA_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_AREA_SCHEMA), true))],
-};
+list_schema!(USER_AREA_LIST_SCHEMA => USER_AREA_SCHEMA);
 
 pub static USER_ITEM_SCHEMA: Schema = Schema {
     fields: &[
@@ -931,9 +1237,7 @@ pub static USER_ITEM_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_ITEM_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_ITEM_SCHEMA), true))],
-};
+list_schema!(USER_ITEM_LIST_SCHEMA => USER_ITEM_SCHEMA);
 
 pub static USER_PRESENT_SCHEMA: Schema = Schema {
     fields: &[
@@ -974,9 +1278,7 @@ pub static USER_GACHA_ENTRY_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_GACHA_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_GACHA_ENTRY_SCHEMA), true))],
-};
+list_schema!(USER_GACHA_LIST_SCHEMA => USER_GACHA_ENTRY_SCHEMA);
 
 // ============================================================================
 // User episodes
@@ -992,9 +1294,7 @@ pub static USER_EPISODE_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_EPISODE_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_EPISODE_SCHEMA), true))],
-};
+list_schema!(USER_EPISODE_LIST_SCHEMA => USER_EPISODE_SCHEMA);
 
 // ============================================================================
 // User missions, login bonuses, costumes, characters
@@ -1015,9 +1315,7 @@ pub static USER_MISSION_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_MISSION_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_MISSION_SCHEMA), true))],
-};
+list_schema!(USER_MISSION_LIST_SCHEMA => USER_MISSION_SCHEMA);
 
 /// A login bonus progress row for the configured user. Field 3 is the number
 /// of rewards received so far (3 or 1 in the live dump).
@@ -1029,9 +1327,7 @@ pub static USER_LOGIN_BONUS_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_LOGIN_BONUS_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_LOGIN_BONUS_SCHEMA), true))],
-};
+list_schema!(USER_LOGIN_BONUS_LIST_SCHEMA => USER_LOGIN_BONUS_SCHEMA);
 
 /// A costume owned by the configured user.
 pub static USER_COSTUME_SCHEMA: Schema = Schema {
@@ -1041,9 +1337,7 @@ pub static USER_COSTUME_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_COSTUME_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_COSTUME_SCHEMA), true))],
-};
+list_schema!(USER_COSTUME_LIST_SCHEMA => USER_COSTUME_SCHEMA);
 
 /// An owned-character row from the individual user-character endpoint.
 pub static USER_CHARACTER_SCHEMA: Schema = Schema {
@@ -1056,9 +1350,7 @@ pub static USER_CHARACTER_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_CHARACTER_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_CHARACTER_SCHEMA), true))],
-};
+list_schema!(USER_CHARACTER_LIST_SCHEMA => USER_CHARACTER_SCHEMA);
 
 /// One per-difficulty score from the complete suite user snapshot.
 pub static USER_MUSIC_SCORE_SCHEMA: Schema = Schema {
@@ -1073,20 +1365,11 @@ pub static USER_MUSIC_SCORE_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_MUSIC_SCORE_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_MUSIC_SCORE_SCHEMA), true))],
-};
+list_schema!(USER_MUSIC_SCORE_LIST_SCHEMA => USER_MUSIC_SCORE_SCHEMA);
 
-pub static USER_MUSIC_SCORE_MAP_ENTRY_SCHEMA: Schema = Schema {
-    fields: &[
-        (1, field("key", ProtoType::Int, false)),
-        (2, field("value", ProtoType::Message(&USER_MUSIC_SCORE_LIST_SCHEMA), false)),
-    ],
-};
+map_entry_schema!(USER_MUSIC_SCORE_MAP_ENTRY_SCHEMA => Int, USER_MUSIC_SCORE_LIST_SCHEMA);
 
-pub static USER_MUSIC_SCORE_MAP_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_MUSIC_SCORE_MAP_ENTRY_SCHEMA), true))],
-};
+list_schema!(USER_MUSIC_SCORE_MAP_SCHEMA => USER_MUSIC_SCORE_MAP_ENTRY_SCHEMA);
 
 /// Aggregate clear counts grouped by difficulty. The per-song status API uses
 /// `USER_MUSIC_SCORE_SCHEMA`; this map mirrors the game's profile counters.
@@ -1098,16 +1381,9 @@ pub static USER_MUSIC_CLEAR_INFO_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_MUSIC_CLEAR_INFO_MAP_ENTRY_SCHEMA: Schema = Schema {
-    fields: &[
-        (1, field("key", ProtoType::String, false)),
-        (2, field("value", ProtoType::Message(&USER_MUSIC_CLEAR_INFO_SCHEMA), false)),
-    ],
-};
+map_entry_schema!(USER_MUSIC_CLEAR_INFO_MAP_ENTRY_SCHEMA => String, USER_MUSIC_CLEAR_INFO_SCHEMA);
 
-pub static USER_MUSIC_CLEAR_INFO_MAP_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_MUSIC_CLEAR_INFO_MAP_ENTRY_SCHEMA), true))],
-};
+list_schema!(USER_MUSIC_CLEAR_INFO_MAP_SCHEMA => USER_MUSIC_CLEAR_INFO_MAP_ENTRY_SCHEMA);
 
 /// Character rank data is carried by the complete suite user snapshot.
 pub static USER_CHARACTER_RANK_SCHEMA: Schema = Schema {
@@ -1131,28 +1407,13 @@ pub static USER_AREA_ITEM_SCHEMA: Schema = Schema {
     ],
 };
 
-/// Protobuf maps are encoded as repeated key/value messages.
-pub static USER_AREA_ITEM_MAP_ENTRY_SCHEMA: Schema = Schema {
-    fields: &[
-        (1, field("key", ProtoType::Int, false)),
-        (2, field("value", ProtoType::Message(&USER_AREA_ITEM_SCHEMA), false)),
-    ],
-};
+map_entry_schema!(USER_AREA_ITEM_MAP_ENTRY_SCHEMA => Int, USER_AREA_ITEM_SCHEMA);
 
-pub static USER_AREA_ITEM_MAP_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_AREA_ITEM_MAP_ENTRY_SCHEMA), true))],
-};
+list_schema!(USER_AREA_ITEM_MAP_SCHEMA => USER_AREA_ITEM_MAP_ENTRY_SCHEMA);
 
-pub static USER_CHARACTER_RANK_MAP_ENTRY_SCHEMA: Schema = Schema {
-    fields: &[
-        (1, field("key", ProtoType::Int, false)),
-        (2, field("value", ProtoType::Message(&USER_CHARACTER_RANK_SCHEMA), false)),
-    ],
-};
+map_entry_schema!(USER_CHARACTER_RANK_MAP_ENTRY_SCHEMA => Int, USER_CHARACTER_RANK_SCHEMA);
 
-pub static USER_CHARACTER_RANK_MAP_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_CHARACTER_RANK_MAP_ENTRY_SCHEMA), true))],
-};
+list_schema!(USER_CHARACTER_RANK_MAP_SCHEMA => USER_CHARACTER_RANK_MAP_ENTRY_SCHEMA);
 
 /// The three released potential dimensions for one character.
 pub static USER_CHARACTER_POTENTIAL_LEVEL_SCHEMA: Schema = Schema {
@@ -1163,23 +1424,9 @@ pub static USER_CHARACTER_POTENTIAL_LEVEL_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_CHARACTER_POTENTIAL_LEVEL_MAP_ENTRY_SCHEMA: Schema = Schema {
-    fields: &[
-        (1, field("key", ProtoType::Int, false)),
-        (2, field("value", ProtoType::Message(&USER_CHARACTER_POTENTIAL_LEVEL_SCHEMA), false)),
-    ],
-};
+map_entry_schema!(USER_CHARACTER_POTENTIAL_LEVEL_MAP_ENTRY_SCHEMA => Int, USER_CHARACTER_POTENTIAL_LEVEL_SCHEMA);
 
-pub static USER_CHARACTER_POTENTIAL_LEVEL_MAP_SCHEMA: Schema = Schema {
-    fields: &[(
-        1,
-        field(
-            "entries",
-            ProtoType::Message(&USER_CHARACTER_POTENTIAL_LEVEL_MAP_ENTRY_SCHEMA),
-            true,
-        ),
-    )],
-};
+list_schema!(USER_CHARACTER_POTENTIAL_LEVEL_MAP_SCHEMA => USER_CHARACTER_POTENTIAL_LEVEL_MAP_ENTRY_SCHEMA);
 
 /// A character bonus granted by character missions.
 pub static USER_CHARACTER_MISSION_BONUS_SCHEMA: Schema = Schema {
@@ -1192,20 +1439,11 @@ pub static USER_CHARACTER_MISSION_BONUS_SCHEMA: Schema = Schema {
     ],
 };
 
-pub static USER_CHARACTER_MISSION_BONUS_LIST_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_CHARACTER_MISSION_BONUS_SCHEMA), true))],
-};
+list_schema!(USER_CHARACTER_MISSION_BONUS_LIST_SCHEMA => USER_CHARACTER_MISSION_BONUS_SCHEMA);
 
-pub static USER_CHARACTER_MISSION_BONUS_MAP_ENTRY_SCHEMA: Schema = Schema {
-    fields: &[
-        (1, field("key", ProtoType::Int, false)),
-        (2, field("value", ProtoType::Message(&USER_CHARACTER_MISSION_BONUS_LIST_SCHEMA), false)),
-    ],
-};
+map_entry_schema!(USER_CHARACTER_MISSION_BONUS_MAP_ENTRY_SCHEMA => Int, USER_CHARACTER_MISSION_BONUS_LIST_SCHEMA);
 
-pub static USER_CHARACTER_MISSION_BONUS_MAP_SCHEMA: Schema = Schema {
-    fields: &[(1, field("entries", ProtoType::Message(&USER_CHARACTER_MISSION_BONUS_MAP_ENTRY_SCHEMA), true))],
-};
+list_schema!(USER_CHARACTER_MISSION_BONUS_MAP_SCHEMA => USER_CHARACTER_MISSION_BONUS_MAP_ENTRY_SCHEMA);
 
 /// The complete suite snapshot fields used by the production user APIs.
 /// Field 22 contains enabled area items, field 54 contains per-song scores,
@@ -1215,7 +1453,10 @@ pub static USER_CHARACTER_MISSION_BONUS_MAP_SCHEMA: Schema = Schema {
 pub static SUITE_USER_RESPONSE_SCHEMA: Schema = Schema {
     fields: &[
         (22, field("userAreaItemMap", ProtoType::Message(&USER_AREA_ITEM_MAP_SCHEMA), false)),
-        (54, field("userMusicScoreMap", ProtoType::Message(&USER_MUSIC_SCORE_MAP_SCHEMA), false)),
+        (
+            54,
+            field("userMusicScoreMap", ProtoType::Message(&USER_MUSIC_SCORE_MAP_SCHEMA), false),
+        ),
         (
             409,
             field(
@@ -1224,7 +1465,10 @@ pub static SUITE_USER_RESPONSE_SCHEMA: Schema = Schema {
                 false,
             ),
         ),
-        (400, field("userCharacterRankMap", ProtoType::Message(&USER_CHARACTER_RANK_MAP_SCHEMA), false)),
+        (
+            400,
+            field("userCharacterRankMap", ProtoType::Message(&USER_CHARACTER_RANK_MAP_SCHEMA), false),
+        ),
         (
             401,
             field(
@@ -1238,6 +1482,41 @@ pub static SUITE_USER_RESPONSE_SCHEMA: Schema = Schema {
             field(
                 "userCharacterMissionBonusMap",
                 ProtoType::Message(&USER_CHARACTER_MISSION_BONUS_MAP_SCHEMA),
+                false,
+            ),
+        ),
+    ],
+};
+
+/// Selected fields from the game's full `/suite/master` snapshot. The suite
+/// payload contains many more message families; keeping this descriptor
+/// focused makes the public aggregate endpoint stable and avoids pretending
+/// that undocumented fields are complete.
+pub static SUITE_MASTER_RESPONSE_SCHEMA: Schema = Schema {
+    fields: &[
+        (
+            2,
+            field("musicDifficulties", ProtoType::Message(&MUSIC_DIFFICULTY_LIST_SCHEMA), false),
+        ),
+        (
+            28,
+            field(
+                "multiLiveDifficulties",
+                ProtoType::Message(&MULTI_LIVE_DIFFICULTY_MAP_SCHEMA),
+                false,
+            ),
+        ),
+        (9, field("areaItems", ProtoType::Message(&AREA_ITEM_MAP_SCHEMA), false)),
+        (10, field("bonds", ProtoType::Message(&BONDS_MAP_SCHEMA), false)),
+        (11, field("bondEffects", ProtoType::Message(&BONDS_EFFECT_MAP_SCHEMA), false)),
+        (14, field("actionSets", ProtoType::Message(&ACTION_SET_MAP_SCHEMA), false)),
+        (30, field("musicShops", ProtoType::Message(&MUSIC_SHOP_MAP_SCHEMA), false)),
+        (47, field("degrees", ProtoType::Message(&DEGREE_MAP_SCHEMA), false)),
+        (
+            49,
+            field(
+                "weeklyMultiLiveDifficulties",
+                ProtoType::Message(&WEEKLY_MULTI_LIVE_DIFFICULTY_MAP_SCHEMA),
                 false,
             ),
         ),

@@ -14,22 +14,20 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::api::models;
-use crate::api::server::resolve_server;
 use crate::api::SharedState;
 use crate::config::ServerConfig;
 use crate::error::{AppError, AppResult};
 use crate::proto::decoder::decode;
 use crate::proto::garupa_schema::{
-    APPLICATION_SCHEMA, AREA_LIST_SCHEMA, BAND_LIST_SCHEMA, CHARACTER_LIST_SCHEMA, CHARACTER_SCHEMA,
-    COSTUME_LIST_SCHEMA, EVENT_TYPE_SCHEMAS, GACHA_LIST_SCHEMA, ITEM_LIST_SCHEMA,
-    LOGIN_BONUS_LIST_SCHEMA, MASTER_EVENT_LIST_SCHEMA, MASTER_MONTHLY_RANKING_LIST_SCHEMA,
-    MUSIC_LIST_SCHEMA, MUSIC_SCHEMA, SHOP_LIST_SCHEMA, SITUATION_LIST_SCHEMA, SKILL_LIST_SCHEMA, STAMP_LIST_SCHEMA,
-    USER_AREA_LIST_SCHEMA, USER_CHARACTER_LIST_SCHEMA, USER_COSTUME_LIST_SCHEMA,
-    USER_DECK_LIST_SCHEMA, USER_EPISODE_LIST_SCHEMA, USER_GACHA_LIST_SCHEMA,
-    USER_ITEM_LIST_SCHEMA, USER_LOGIN_BONUS_LIST_SCHEMA, USER_MISSION_LIST_SCHEMA,
-    USER_PRESENT_LIST_SCHEMA, USER_PROFILE_RESPONSE_SCHEMA, USER_SITUATION_LIST_SCHEMA,
-    USER_STAMP_LIST_SCHEMA, USER_TITLE_SCHEMA, USER_MONTHLY_RANKING_RANKING_RESPONSE_SCHEMA,
-    SUITE_USER_RESPONSE_SCHEMA,
+    ACTION_SET_MAP_SCHEMA, APPLICATION_SCHEMA, AREA_ITEM_MAP_SCHEMA, AREA_ITEM_SPAWN_MAP_SCHEMA, AREA_LIST_SCHEMA, BAND_LIST_SCHEMA,
+    BONDS_EFFECT_MAP_SCHEMA, BONDS_MAP_SCHEMA, CHARACTER_LIST_SCHEMA, CHARACTER_SCHEMA, COSTUME_LIST_SCHEMA, DEGREE_MAP_SCHEMA,
+    EVENT_TYPE_SCHEMAS, GACHA_LIST_SCHEMA, ITEM_LIST_SCHEMA, LOGIN_BONUS_LIST_SCHEMA, MASTER_EVENT_LIST_SCHEMA,
+    MASTER_MONTHLY_RANKING_LIST_SCHEMA, MULTI_LIVE_DIFFICULTY_MAP_SCHEMA, MUSIC_DIFFICULTY_LIST_SCHEMA, MUSIC_LIST_SCHEMA, MUSIC_SCHEMA,
+    MUSIC_SHOP_MAP_SCHEMA, SHOP_LIST_SCHEMA, SITUATION_LIST_SCHEMA, SKILL_LIST_SCHEMA, STAMP_LIST_SCHEMA, SUITE_MASTER_RESPONSE_SCHEMA,
+    SUITE_USER_RESPONSE_SCHEMA, USER_AREA_LIST_SCHEMA, USER_CHARACTER_LIST_SCHEMA, USER_COSTUME_LIST_SCHEMA, USER_DECK_LIST_SCHEMA,
+    USER_EPISODE_LIST_SCHEMA, USER_GACHA_LIST_SCHEMA, USER_ITEM_LIST_SCHEMA, USER_LOGIN_BONUS_LIST_SCHEMA, USER_MISSION_LIST_SCHEMA,
+    USER_MONTHLY_RANKING_RANKING_RESPONSE_SCHEMA, USER_PRESENT_LIST_SCHEMA, USER_PROFILE_RESPONSE_SCHEMA, USER_SITUATION_LIST_SCHEMA,
+    USER_STAMP_LIST_SCHEMA, USER_TITLE_SCHEMA, WEEKLY_MULTI_LIVE_DIFFICULTY_MAP_SCHEMA,
 };
 use crate::proto::schema::Schema;
 
@@ -66,7 +64,9 @@ fn jp_config(state: &SharedState) -> AppResult<&ServerConfig> {
 /// Builds a JSON response from a pre-serialized body.
 fn json_response(body: String) -> Response {
     let mut response = Response::new(Body::from(body));
-    response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     response
 }
 
@@ -99,25 +99,14 @@ async fn cached_json(
         .await
 }
 
-/// Serves the decoded list root as-is so list endpoints keep the game's
-/// `entries` wrapper when present. User lists can legitimately return payloads
-/// without an entries field when the account has no data, so anything the game
-/// sends is passed through untouched rather than rejected.
-fn wrapped_map(root: &Value, _raw: &[u8]) -> AppResult<Value> {
+/// Passes a decoded response through unchanged.
+fn clone_root(root: &Value, _raw: &[u8]) -> AppResult<Value> {
     Ok(root.clone())
 }
 
-/// Fetches a master list endpoint and serves its wrapped entries root, cached
-/// under the master TTL.
-async fn master_list(state: &SharedState, key: &str, url: &str, schema: &Schema) -> AppResult<Response> {
-    let body = cached_json(state, key, state.config.cache_ttl_master_secs, url, schema, wrapped_map).await?;
-    Ok(json_response(body))
-}
-
-/// Fetches a master endpoint and serves the decoded object as-is, cached under
-/// the master TTL.
-async fn master_fetch(state: &SharedState, key: &str, url: &str, schema: &Schema) -> AppResult<Response> {
-    let body = cached_json(state, key, state.config.cache_ttl_master_secs, url, schema, |root, _| Ok(root.clone())).await?;
+/// Fetches a master endpoint and caches its decoded response.
+async fn master_response(state: &SharedState, key: &str, url: &str, schema: &Schema) -> AppResult<Response> {
+    let body = cached_json(state, key, state.config.cache_ttl_master_secs, url, schema, clone_root).await?;
     Ok(json_response(body))
 }
 
@@ -125,7 +114,7 @@ async fn master_fetch(state: &SharedState, key: &str, url: &str, schema: &Schema
 /// use the same cache key as their list endpoint, so adding derived views never
 /// creates an extra upstream request.
 async fn master_list_value(state: &SharedState, key: &str, url: &str, schema: &Schema) -> AppResult<Value> {
-    let body = cached_json(state, key, state.config.cache_ttl_master_secs, url, schema, wrapped_map).await?;
+    let body = cached_json(state, key, state.config.cache_ttl_master_secs, url, schema, clone_root).await?;
     Ok(serde_json::from_str(&body)?)
 }
 
@@ -162,17 +151,9 @@ fn filtered_entries(root: &Value, predicate: impl Fn(&Value) -> bool) -> Value {
     json!({ "entries": entries })
 }
 
-/// Fetches a user list endpoint and serves its wrapped entries root, cached
-/// under the user data TTL.
-async fn user_list(state: &SharedState, key: &str, url: &str, schema: &Schema) -> AppResult<Response> {
-    let body = cached_json(state, key, state.config.cache_ttl_user_secs, url, schema, wrapped_map).await?;
-    Ok(json_response(body))
-}
-
-/// Fetches a decoded user endpoint and serves the object as-is, cached under
-/// the user data TTL.
-async fn user_fetch(state: &SharedState, key: &str, url: &str, schema: &Schema) -> AppResult<Response> {
-    let body = cached_json(state, key, state.config.cache_ttl_user_secs, url, schema, |root, _| Ok(root.clone())).await?;
+/// Fetches a user endpoint and caches its decoded response.
+async fn user_response(state: &SharedState, key: &str, url: &str, schema: &Schema) -> AppResult<Response> {
+    let body = cached_json(state, key, state.config.cache_ttl_user_secs, url, schema, clone_root).await?;
     Ok(json_response(body))
 }
 
@@ -186,7 +167,7 @@ async fn suite_user_value(state: &SharedState, key: &str) -> AppResult<Value> {
         state.config.cache_ttl_user_secs,
         &state.client.suite_user_url(cfg),
         &SUITE_USER_RESPONSE_SCHEMA,
-        |root, _| Ok(root.clone()),
+        clone_root,
     )
     .await?;
     Ok(serde_json::from_str(&body)?)
@@ -194,11 +175,10 @@ async fn suite_user_value(state: &SharedState, key: &str) -> AppResult<Value> {
 
 /// Converts a decoded protobuf map into the list form used by the public API.
 /// Map keys are retained as a field when the value does not already carry the
-/// identifier, which makes character-rank entries self-contained for clients.
-fn suite_map_values(root: &Value, map_name: &str, key_name: Option<&str>) -> Value {
+/// identifier, which makes map-backed entries self-contained for clients.
+fn flatten_map_values(root: &Value, key_name: Option<&str>, overwrite_key: bool) -> Value {
     let entries = root
-        .get(map_name)
-        .and_then(|map| map.get("entries"))
+        .get("entries")
         .and_then(Value::as_array)
         .map(|entries| {
             entries
@@ -207,7 +187,9 @@ fn suite_map_values(root: &Value, map_name: &str, key_name: Option<&str>) -> Val
                     let mut value = entry.get("value")?.clone();
                     if let Some(key_name) = key_name {
                         if let (Some(key), Some(object)) = (entry.get("key"), value.as_object_mut()) {
-                            object.insert(key_name.to_string(), key.clone());
+                            if overwrite_key || !object.contains_key(key_name) {
+                                object.insert(key_name.to_string(), key.clone());
+                            }
                         }
                     }
                     Some(value)
@@ -219,33 +201,121 @@ fn suite_map_values(root: &Value, map_name: &str, key_name: Option<&str>) -> Val
     json!({ "entries": entries })
 }
 
-/// Flattens the suite user's music-score map into one entry per song and
-/// difficulty. The map key is copied into `musicId` when the nested score row
-/// does not contain it, which keeps the response useful for incomplete rows.
-fn suite_music_score_entries(root: &Value) -> Vec<Value> {
+/// Converts a map field inside a decoded suite response into the public list
+/// form used by the user endpoints.
+fn suite_map_values(root: &Value, map_name: &str, key_name: Option<&str>) -> Value {
+    root.get(map_name)
+        .map(|map| flatten_map_values(map, key_name, true))
+        .unwrap_or_else(|| json!({ "entries": [] }))
+}
+
+/// Fetches a map-shaped master endpoint and exposes its values as a list. The
+/// upstream map key is copied into the requested identifier field when the
+/// nested object does not contain one.
+async fn map_list(state: &SharedState, key: &str, url: &str, schema: &Schema, key_name: Option<&str>) -> AppResult<Response> {
+    let body = cached_json(state, key, state.config.cache_ttl_master_secs, url, schema, |root, _| {
+        Ok(flatten_map_values(root, key_name, false))
+    })
+    .await?;
+    Ok(json_response(body))
+}
+
+macro_rules! master_handlers {
+    ($($(#[$meta:meta])* $name:ident => ($key:literal, $url:ident, $schema:ident);)+) => {
+        $(
+            $(#[$meta])*
+            pub async fn $name(State(state): State<SharedState>) -> AppResult<Response> {
+                let cfg = jp_config(&state)?;
+                master_response(&state, $key, &state.client.$url(cfg), &$schema).await
+            }
+        )+
+    };
+}
+
+macro_rules! map_handlers {
+    ($($(#[$meta:meta])* $name:ident => ($key:literal, $url:ident, $schema:ident, $key_field:literal);)+) => {
+        $(
+            $(#[$meta])*
+            pub async fn $name(State(state): State<SharedState>) -> AppResult<Response> {
+                let cfg = jp_config(&state)?;
+                map_list(&state, $key, &state.client.$url(cfg), &$schema, Some($key_field)).await
+            }
+        )+
+    };
+}
+
+macro_rules! user_handlers {
+    ($($(#[$meta:meta])* $name:ident => ($key:literal, $url:ident, $schema:ident);)+) => {
+        $(
+            $(#[$meta])*
+            pub async fn $name(State(state): State<SharedState>) -> AppResult<Response> {
+                let cfg = jp_config(&state)?;
+                let key = format!("{}:{}", $key, cfg.uid);
+                user_response(&state, &key, &state.client.$url(cfg), &$schema).await
+            }
+        )+
+    };
+}
+
+macro_rules! master_entry_handlers {
+    ($($(#[$meta:meta])* $name:ident($id:ident) => ($key:literal, $url:ident, $schema:ident, $id_field:literal, $resource:literal);)+) => {
+        $(
+            $(#[$meta])*
+            pub async fn $name(
+                State(state): State<SharedState>,
+                Path((_server, $id)): Path<(String, i64)>,
+            ) -> AppResult<Response> {
+                let cfg = jp_config(&state)?;
+                master_entry(&state, $key, &state.client.$url(cfg), &$schema, $id_field, $id, $resource).await
+            }
+        )+
+    };
+}
+
+macro_rules! filtered_master_handlers {
+    ($($(#[$meta:meta])* $name:ident($id:ident) => ($key:literal, $url:ident, $schema:ident, $id_field:literal, $filter_field:literal);)+) => {
+        $(
+            $(#[$meta])*
+            pub async fn $name(
+                State(state): State<SharedState>,
+                Path((_server, $id)): Path<(String, i64)>,
+            ) -> AppResult<Response> {
+                if $id < 1 {
+                    return Err(AppError::bad_request(concat!($id_field, " must be >= 1")));
+                }
+                let cfg = jp_config(&state)?;
+                let root = master_list_value(&state, $key, &state.client.$url(cfg), &$schema).await?;
+                Ok(json_response(filtered_entries(&root, |entry| {
+                    entry.get($filter_field).and_then(Value::as_i64) == Some($id)
+                }).to_string()))
+            }
+        )+
+    };
+}
+
+/// Flattens a map whose values are entries-wrapped lists. The map key is copied
+/// into each nested item when the item does not already contain the key field.
+fn flatten_nested_map_values(root: &Value, map_name: &str, key_name: &str) -> Vec<Value> {
     let mut result = Vec::new();
-    let map_entries = root
-        .get("userMusicScoreMap")
-        .and_then(|map| map.get("entries"))
-        .and_then(Value::as_array);
+    let map_entries = root.get(map_name).and_then(|map| map.get("entries")).and_then(Value::as_array);
 
     if let Some(map_entries) = map_entries {
         for map_entry in map_entries {
             let key = map_entry.get("key").cloned();
-            let scores = map_entry
+            let values = map_entry
                 .get("value")
                 .and_then(|value| value.get("entries"))
                 .and_then(Value::as_array);
 
-            if let Some(scores) = scores {
-                for score in scores {
-                    let mut score = score.clone();
-                    if score.get("musicId").is_none() {
-                        if let (Some(key), Some(object)) = (&key, score.as_object_mut()) {
-                            object.insert("musicId".to_string(), key.clone());
+            if let Some(values) = values {
+                for value in values {
+                    let mut value = value.clone();
+                    if value.get(key_name).is_none() {
+                        if let (Some(key), Some(object)) = (&key, value.as_object_mut()) {
+                            object.insert(key_name.to_string(), key.clone());
                         }
                     }
-                    result.push(score);
+                    result.push(value);
                 }
             }
         }
@@ -257,14 +327,10 @@ fn suite_music_score_entries(root: &Value) -> Vec<Value> {
 const MUSIC_DIFFICULTIES: [&str; 5] = ["easy", "normal", "hard", "expert", "special"];
 
 fn normalize_music_difficulty(raw: &str) -> Option<&'static str> {
-    match raw.to_ascii_lowercase().as_str() {
-        "easy" => Some("easy"),
-        "normal" => Some("normal"),
-        "hard" => Some("hard"),
-        "expert" => Some("expert"),
-        "special" => Some("special"),
-        _ => None,
-    }
+    MUSIC_DIFFICULTIES
+        .iter()
+        .copied()
+        .find(|difficulty| raw.eq_ignore_ascii_case(difficulty))
 }
 
 /// Builds the single-song status response from the decoded suite snapshot.
@@ -272,7 +338,7 @@ fn normalize_music_difficulty(raw: &str) -> Option<&'static str> {
 /// that song/difficulty; they are represented as an unplayed result rather
 /// than a 404 so callers can query arbitrary music IDs safely.
 fn suite_music_status_value(root: &Value, music_id: i64, difficulty: &str) -> Value {
-    let score = suite_music_score_entries(root)
+    let score = flatten_nested_map_values(root, "userMusicScoreMap", "musicId")
         .into_iter()
         .rev()
         .find(|entry| {
@@ -302,39 +368,6 @@ fn suite_music_status_value(root: &Value, music_id: i64, difficulty: &str) -> Va
     })
 }
 
-/// Flattens the character-mission-bonus map into public API entries.
-fn suite_character_mission_bonus_entries(root: &Value) -> Vec<Value> {
-    let mut result = Vec::new();
-    let map_entries = root
-        .get("userCharacterMissionBonusMap")
-        .and_then(|map| map.get("entries"))
-        .and_then(Value::as_array);
-
-    if let Some(map_entries) = map_entries {
-        for map_entry in map_entries {
-            let key = map_entry.get("key").cloned();
-            let bonuses = map_entry
-                .get("value")
-                .and_then(|value| value.get("entries"))
-                .and_then(Value::as_array);
-
-            if let Some(bonuses) = bonuses {
-                for bonus in bonuses {
-                    let mut bonus = bonus.clone();
-                    if bonus.get("characterId").is_none() {
-                        if let (Some(key), Some(object)) = (&key, bonus.as_object_mut()) {
-                            object.insert("characterId".to_string(), key.clone());
-                        }
-                    }
-                    result.push(bonus);
-                }
-            }
-        }
-    }
-
-    result
-}
-
 /// Joins character rank entries with the separate three-dimensional potential
 /// level map and character-mission-bonus map from the same suite snapshot.
 fn suite_character_rank_values(root: &Value) -> Value {
@@ -344,7 +377,7 @@ fn suite_character_rank_values(root: &Value) -> Value {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let mission_bonus_entries = suite_character_mission_bonus_entries(root);
+    let mission_bonus_entries = flatten_nested_map_values(root, "userCharacterMissionBonusMap", "characterId");
 
     let entries = root
         .get("userCharacterRankMap")
@@ -527,22 +560,37 @@ async fn fetch_monthly_ranking_value(state: &SharedState, monthly_id: i64) -> Ap
 }
 
 /// GET /api/{server}/monthly-ranking/{monthly_id} — near/top/border users.
-pub async fn monthly_ranking_full(State(state): State<SharedState>, Path((_server, monthly_id)): Path<(String, i64)>) -> AppResult<Response> {
+pub async fn monthly_ranking_full(
+    State(state): State<SharedState>,
+    Path((_server, monthly_id)): Path<(String, i64)>,
+) -> AppResult<Response> {
     let body = fetch_monthly_body(&state, monthly_id).await?;
     Ok(json_response(body))
 }
 
 /// GET /api/{server}/monthly-ranking/{monthly_id}/top — top users only.
-pub async fn monthly_ranking_top(State(state): State<SharedState>, Path((_server, monthly_id)): Path<(String, i64)>) -> AppResult<Json<Value>> {
+pub async fn monthly_ranking_top(
+    State(state): State<SharedState>,
+    Path((_server, monthly_id)): Path<(String, i64)>,
+) -> AppResult<Json<Value>> {
     let full = fetch_monthly_ranking_value(&state, monthly_id).await?;
-    let users = full.get("monthlyRankingPointTopUsers").cloned().unwrap_or_else(|| Value::Array(Vec::new()));
+    let users = full
+        .get("monthlyRankingPointTopUsers")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
     Ok(Json(json!({ "users": users })))
 }
 
 /// GET /api/{server}/monthly-ranking/{monthly_id}/border — border users only.
-pub async fn monthly_ranking_border(State(state): State<SharedState>, Path((_server, monthly_id)): Path<(String, i64)>) -> AppResult<Json<Value>> {
+pub async fn monthly_ranking_border(
+    State(state): State<SharedState>,
+    Path((_server, monthly_id)): Path<(String, i64)>,
+) -> AppResult<Json<Value>> {
     let full = fetch_monthly_ranking_value(&state, monthly_id).await?;
-    let users = full.get("monthlyRankingPointBorderUsers").cloned().unwrap_or_else(|| Value::Array(Vec::new()));
+    let users = full
+        .get("monthlyRankingPointBorderUsers")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
     Ok(Json(json!({ "users": users })))
 }
 
@@ -571,17 +619,18 @@ pub async fn event_master(State(state): State<SharedState>) -> AppResult<Respons
 }
 
 /// GET /api/{server}/events/{event_id} — one event from the cached master list.
-pub async fn event_single(
-    State(state): State<SharedState>,
-    Path((_server, event_id)): Path<(String, i64)>,
-) -> AppResult<Response> {
+pub async fn event_single(State(state): State<SharedState>, Path((_server, event_id)): Path<(String, i64)>) -> AppResult<Response> {
     if event_id < 1 {
         return Err(AppError::bad_request("eventId must be >= 1"));
     }
     let events = fetch_event_master_value(&state).await?;
     let entry = events
         .as_array()
-        .and_then(|entries| entries.iter().find(|entry| entry.get("eventId").and_then(Value::as_i64) == Some(event_id)))
+        .and_then(|entries| {
+            entries
+                .iter()
+                .find(|entry| entry.get("eventId").and_then(Value::as_i64) == Some(event_id))
+        })
         .cloned()
         .ok_or_else(|| AppError::not_found(format!("event {event_id} not found")))?;
     Ok(json_response(entry.to_string()))
@@ -641,14 +690,9 @@ pub async fn event_ranking(
 
     let key = format!("event-ranking:{event_id}:{event_type}:{}", query.mid.unwrap_or(0));
     let url = state.client.event_ranking_url(cfg, event_id, &event_type, query.mid);
-    let body = cached_json(
-        &state,
-        &key,
-        state.config.cache_ttl_ranking_secs,
-        &url,
-        schema,
-        |root, _| Ok(serde_json::to_value(models::event_ranking_report(root, &event_type))?),
-    )
+    let body = cached_json(&state, &key, state.config.cache_ttl_ranking_secs, &url, schema, |root, _| {
+        Ok(serde_json::to_value(models::event_ranking_report(root, &event_type))?)
+    })
     .await?;
     Ok(json_response(body))
 }
@@ -657,21 +701,74 @@ pub async fn event_ranking(
 // Application
 // ============================================================================
 
-/// GET /api/{server}/application — app version, server status, and per-platform maintenance.
-pub async fn application(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_fetch(&state, "application", &state.client.application_url(cfg), &APPLICATION_SCHEMA).await
+master_handlers! {
+    /// GET /api/{server}/application — app version and maintenance status.
+    application => ("application", application_url, APPLICATION_SCHEMA);
+    /// GET /api/{server}/music — music master list.
+    music_master => ("music-master", music_master_url, MUSIC_LIST_SCHEMA);
+    /// GET /api/{server}/music-difficulties — chart and score thresholds.
+    music_difficulty_master => ("music-difficulty-master", music_difficulty_master_url, MUSIC_DIFFICULTY_LIST_SCHEMA);
+    /// GET /api/{server}/master-suite — selected fields from the full snapshot.
+    master_suite => ("suite-master", suite_master_url, SUITE_MASTER_RESPONSE_SCHEMA);
+    /// GET /api/{server}/characters — character master list.
+    character_master => ("character-master", character_master_url, CHARACTER_LIST_SCHEMA);
+    /// GET /api/{server}/bands — band master list.
+    band_master => ("band-master", band_master_url, BAND_LIST_SCHEMA);
+    /// GET /api/{server}/areas — area master list.
+    area_master => ("area-master", area_master_url, AREA_LIST_SCHEMA);
+    /// GET /api/{server}/gacha — gacha master list.
+    gacha_master => ("gacha-master", gacha_master_url, GACHA_LIST_SCHEMA);
+    /// GET /api/{server}/items — item master list.
+    item_master => ("item-master", item_master_url, ITEM_LIST_SCHEMA);
+    /// GET /api/{server}/skills — skill master list.
+    skill_master => ("skill-master", skill_master_url, SKILL_LIST_SCHEMA);
+    /// GET /api/{server}/stamps — stamp master list.
+    stamp_master => ("stamp-master", stamp_master_url, STAMP_LIST_SCHEMA);
+    /// GET /api/{server}/login-bonuses — login bonus master list.
+    login_bonus_master => ("loginbonus-master", login_bonus_master_url, LOGIN_BONUS_LIST_SCHEMA);
+    /// GET /api/{server}/costumes — costume master list.
+    costume_master => ("costume-master", costume_master_url, COSTUME_LIST_SCHEMA);
+    /// GET /api/{server}/shops — shop master list.
+    shops => ("shop-master", shop_url, SHOP_LIST_SCHEMA);
+    /// GET /api/{server}/cards — card (situation) master list.
+    cards => ("situation-master", situation_master_url, SITUATION_LIST_SCHEMA);
+}
+
+master_entry_handlers! {
+    /// GET /api/{server}/bands/{band_id} — one band.
+    band_single(band_id) => ("band-master", band_master_url, BAND_LIST_SCHEMA, "bandId", "band");
+    /// GET /api/{server}/areas/{area_id} — one area.
+    area_single(area_id) => ("area-master", area_master_url, AREA_LIST_SCHEMA, "areaId", "area");
+    /// GET /api/{server}/gacha/{gacha_id} — one gacha.
+    gacha_single(gacha_id) => ("gacha-master", gacha_master_url, GACHA_LIST_SCHEMA, "gachaId", "gacha");
+    /// GET /api/{server}/items/{item_id} — one item.
+    item_single(item_id) => ("item-master", item_master_url, ITEM_LIST_SCHEMA, "itemId", "item");
+    /// GET /api/{server}/stamps/{stamp_id} — one stamp.
+    stamp_single(stamp_id) => ("stamp-master", stamp_master_url, STAMP_LIST_SCHEMA, "stampId", "stamp");
+    /// GET /api/{server}/login-bonuses/{login_bonus_id} — one campaign.
+    login_bonus_single(login_bonus_id) => ("loginbonus-master", login_bonus_master_url, LOGIN_BONUS_LIST_SCHEMA, "loginBonusId", "login bonus");
+    /// GET /api/{server}/costumes/{costume_id} — one costume.
+    costume_single(costume_id) => ("costume-master", costume_master_url, COSTUME_LIST_SCHEMA, "costumeId", "costume");
+    /// GET /api/{server}/shops/{shop_id} — one shop.
+    shop_single(shop_id) => ("shop-master", shop_url, SHOP_LIST_SCHEMA, "shopId", "shop");
+    /// GET /api/{server}/cards/{card_id} — one card.
+    card_single(card_id) => ("situation-master", situation_master_url, SITUATION_LIST_SCHEMA, "situationId", "card");
+}
+
+filtered_master_handlers! {
+    /// GET /api/{server}/music/{music_id}/difficulties — chart metadata.
+    music_difficulties(music_id) => ("music-difficulty-master", music_difficulty_master_url, MUSIC_DIFFICULTY_LIST_SCHEMA, "musicId", "musicId");
+    /// GET /api/{server}/characters/{character_id}/cards — character cards.
+    character_cards(character_id) => ("situation-master", situation_master_url, SITUATION_LIST_SCHEMA, "characterId", "characterIndex");
+    /// GET /api/{server}/characters/{character_id}/costumes — character costumes.
+    character_costumes(character_id) => ("costume-master", costume_master_url, COSTUME_LIST_SCHEMA, "characterId", "characterId");
+    /// GET /api/{server}/bands/{band_id}/characters — band members.
+    band_characters(band_id) => ("character-master", character_master_url, CHARACTER_LIST_SCHEMA, "bandId", "bandId");
 }
 
 // ============================================================================
 // Master data
 // ============================================================================
-
-/// GET /api/{server}/music — music master list.
-pub async fn music_master(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_list(&state, "music-master", &state.client.music_master_url(cfg), &MUSIC_LIST_SCHEMA).await
-}
 
 /// GET /api/{server}/music/{music_id} — a single music master entry. The
 /// upstream `music/{id}` response is a bare object (verified by live probe),
@@ -682,13 +779,28 @@ pub async fn music_single(State(state): State<SharedState>, Path((_server, music
         return Err(AppError::bad_request("musicId must be >= 1"));
     }
     let key = format!("music-single:{music_id}");
-    master_fetch(&state, &key, &state.client.music_single_url(cfg, music_id), &MUSIC_SCHEMA).await
+    master_response(&state, &key, &state.client.music_single_url(cfg, music_id), &MUSIC_SCHEMA).await
 }
 
-/// GET /api/{server}/characters — character master list.
-pub async fn character_master(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_list(&state, "character-master", &state.client.character_master_url(cfg), &CHARACTER_LIST_SCHEMA).await
+map_handlers! {
+    /// GET /api/{server}/multi-live-difficulties — regular live rules.
+    multi_live_difficulty_master => ("multi-live-difficulty-master", multi_live_difficulty_master_url, MULTI_LIVE_DIFFICULTY_MAP_SCHEMA, "id");
+    /// GET /api/{server}/weekly-multi-live-difficulties — weekly live rules.
+    weekly_multi_live_difficulty_master => ("weekly-multi-live-difficulty-master", weekly_multi_live_difficulty_master_url, WEEKLY_MULTI_LIVE_DIFFICULTY_MAP_SCHEMA, "id");
+    /// GET /api/{server}/area-items — area item metadata.
+    area_item_master => ("area-item-master", area_item_master_url, AREA_ITEM_MAP_SCHEMA, "areaItemId");
+    /// GET /api/{server}/area-item-spawns — area item placement points.
+    area_item_spawn_master => ("area-item-spawn-master", area_item_spawn_master_url, AREA_ITEM_SPAWN_MAP_SCHEMA, "spawnPoint");
+    /// GET /api/{server}/bonds — character bond definitions.
+    bonds_master => ("bonds-master", bonds_master_url, BONDS_MAP_SCHEMA, "bondsId");
+    /// GET /api/{server}/bond-effects — bonuses granted by bonds.
+    bonds_effect_master => ("bonds-effect-master", bonds_effect_master_url, BONDS_EFFECT_MAP_SCHEMA, "bondsEffectId");
+    /// GET /api/{server}/action-sets — area action sets.
+    action_set_master => ("action-set-master", action_set_master_url, ACTION_SET_MAP_SCHEMA, "actionSetId");
+    /// GET /api/{server}/music-shops — song exchange entries.
+    music_shop_master => ("music-shop-master", music_shop_master_url, MUSIC_SHOP_MAP_SCHEMA, "musicShopId");
+    /// GET /api/{server}/degrees — profile degree/badge metadata.
+    degree_master => ("degree-master", degree_master_url, DEGREE_MAP_SCHEMA, "degreeId");
 }
 
 /// GET /api/{server}/characters/{character_id} — a single character master
@@ -700,106 +812,13 @@ pub async fn character_single(State(state): State<SharedState>, Path((_server, c
         return Err(AppError::bad_request("characterId must be >= 1"));
     }
     let key = format!("character-single:{character_id}");
-    master_fetch(&state, &key, &state.client.character_single_url(cfg, character_id), &CHARACTER_SCHEMA).await
-}
-
-/// GET /api/{server}/characters/{character_id}/cards — cards for a character.
-pub async fn character_cards(
-    State(state): State<SharedState>,
-    Path((_server, character_id)): Path<(String, i64)>,
-) -> AppResult<Response> {
-    if character_id < 1 {
-        return Err(AppError::bad_request("characterId must be >= 1"));
-    }
-    let cfg = jp_config(&state)?;
-    let root = master_list_value(&state, "situation-master", &state.client.situation_master_url(cfg), &SITUATION_LIST_SCHEMA).await?;
-    Ok(json_response(
-        filtered_entries(&root, |entry| entry.get("characterIndex").and_then(Value::as_i64) == Some(character_id)).to_string(),
-    ))
-}
-
-/// GET /api/{server}/characters/{character_id}/costumes — costumes for a character.
-pub async fn character_costumes(
-    State(state): State<SharedState>,
-    Path((_server, character_id)): Path<(String, i64)>,
-) -> AppResult<Response> {
-    if character_id < 1 {
-        return Err(AppError::bad_request("characterId must be >= 1"));
-    }
-    let cfg = jp_config(&state)?;
-    let root = master_list_value(&state, "costume-master", &state.client.costume_master_url(cfg), &COSTUME_LIST_SCHEMA).await?;
-    Ok(json_response(
-        filtered_entries(&root, |entry| entry.get("characterId").and_then(Value::as_i64) == Some(character_id)).to_string(),
-    ))
-}
-
-/// GET /api/{server}/bands — band master list.
-pub async fn band_master(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_list(&state, "band-master", &state.client.band_master_url(cfg), &BAND_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/bands/{band_id} — one band from the cached master list.
-pub async fn band_single(State(state): State<SharedState>, Path((_server, band_id)): Path<(String, i64)>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_entry(&state, "band-master", &state.client.band_master_url(cfg), &BAND_LIST_SCHEMA, "bandId", band_id, "band").await
-}
-
-/// GET /api/{server}/bands/{band_id}/characters — band members.
-pub async fn band_characters(
-    State(state): State<SharedState>,
-    Path((_server, band_id)): Path<(String, i64)>,
-) -> AppResult<Response> {
-    if band_id < 1 {
-        return Err(AppError::bad_request("bandId must be >= 1"));
-    }
-    let cfg = jp_config(&state)?;
-    let root = master_list_value(&state, "character-master", &state.client.character_master_url(cfg), &CHARACTER_LIST_SCHEMA).await?;
-    Ok(json_response(
-        filtered_entries(&root, |entry| entry.get("bandId").and_then(Value::as_i64) == Some(band_id)).to_string(),
-    ))
-}
-
-/// GET /api/{server}/areas — area master list.
-pub async fn area_master(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_list(&state, "area-master", &state.client.area_master_url(cfg), &AREA_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/areas/{area_id} — one area from the cached master list.
-pub async fn area_single(State(state): State<SharedState>, Path((_server, area_id)): Path<(String, i64)>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_entry(&state, "area-master", &state.client.area_master_url(cfg), &AREA_LIST_SCHEMA, "areaId", area_id, "area").await
-}
-
-/// GET /api/{server}/gacha — gacha master list.
-pub async fn gacha_master(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_list(&state, "gacha-master", &state.client.gacha_master_url(cfg), &GACHA_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/gacha/{gacha_id} — one gacha from the cached master list.
-pub async fn gacha_single(State(state): State<SharedState>, Path((_server, gacha_id)): Path<(String, i64)>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_entry(&state, "gacha-master", &state.client.gacha_master_url(cfg), &GACHA_LIST_SCHEMA, "gachaId", gacha_id, "gacha").await
-}
-
-/// GET /api/{server}/items — item master list.
-pub async fn item_master(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_list(&state, "item-master", &state.client.item_master_url(cfg), &ITEM_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/items/{item_id} — one item from the cached master list.
-pub async fn item_single(State(state): State<SharedState>, Path((_server, item_id)): Path<(String, i64)>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_entry(&state, "item-master", &state.client.item_master_url(cfg), &ITEM_LIST_SCHEMA, "itemId", item_id, "item").await
-}
-
-/// GET /api/{server}/skills — skill master list.
-pub async fn skill_master(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_list(&state, "skill-master", &state.client.skill_master_url(cfg), &SKILL_LIST_SCHEMA).await
+    master_response(
+        &state,
+        &key,
+        &state.client.character_single_url(cfg, character_id),
+        &CHARACTER_SCHEMA,
+    )
+    .await
 }
 
 /// GET /api/{server}/skills/normalized — skills grouped by ID with an ordered
@@ -808,14 +827,13 @@ pub async fn skill_master(State(state): State<SharedState>) -> AppResult<Respons
 pub async fn skill_master_normalized(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
     let root = master_list_value(&state, "skill-master", &state.client.skill_master_url(cfg), &SKILL_LIST_SCHEMA).await?;
-    Ok(json_response(json!({ "entries": serde_json::to_value(models::skill_list(&root))? }).to_string()))
+    Ok(json_response(
+        json!({ "entries": serde_json::to_value(models::skill_list(&root))? }).to_string(),
+    ))
 }
 
 /// GET /api/{server}/skills/{skill_id} — one normalized skill with all levels.
-pub async fn skill_single(
-    State(state): State<SharedState>,
-    Path((_server, skill_id)): Path<(String, i64)>,
-) -> AppResult<Response> {
+pub async fn skill_single(State(state): State<SharedState>, Path((_server, skill_id)): Path<(String, i64)>) -> AppResult<Response> {
     if skill_id < 1 {
         return Err(AppError::bad_request("skillId must be >= 1"));
     }
@@ -829,15 +847,18 @@ pub async fn skill_single(
 }
 
 /// GET /api/{server}/skills/{skill_id}/cards — cards using a skill.
-pub async fn skill_cards(
-    State(state): State<SharedState>,
-    Path((_server, skill_id)): Path<(String, i64)>,
-) -> AppResult<Response> {
+pub async fn skill_cards(State(state): State<SharedState>, Path((_server, skill_id)): Path<(String, i64)>) -> AppResult<Response> {
     if skill_id < 1 {
         return Err(AppError::bad_request("skillId must be >= 1"));
     }
     let cfg = jp_config(&state)?;
-    let root = master_list_value(&state, "situation-master", &state.client.situation_master_url(cfg), &SITUATION_LIST_SCHEMA).await?;
+    let root = master_list_value(
+        &state,
+        "situation-master",
+        &state.client.situation_master_url(cfg),
+        &SITUATION_LIST_SCHEMA,
+    )
+    .await?;
     Ok(json_response(
         filtered_entries(&root, |entry| {
             entry.get("skillId").and_then(Value::as_i64) == Some(skill_id)
@@ -847,137 +868,39 @@ pub async fn skill_cards(
     ))
 }
 
-/// GET /api/{server}/stamps — stamp master list.
-pub async fn stamp_master(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_list(&state, "stamp-master", &state.client.stamp_master_url(cfg), &STAMP_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/stamps/{stamp_id} — one stamp from the cached master list.
-pub async fn stamp_single(State(state): State<SharedState>, Path((_server, stamp_id)): Path<(String, i64)>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_entry(&state, "stamp-master", &state.client.stamp_master_url(cfg), &STAMP_LIST_SCHEMA, "stampId", stamp_id, "stamp").await
-}
-
-/// GET /api/{server}/login-bonuses — login bonus master list.
-pub async fn login_bonus_master(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_list(&state, "loginbonus-master", &state.client.login_bonus_master_url(cfg), &LOGIN_BONUS_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/login-bonuses/{login_bonus_id} — one campaign.
-pub async fn login_bonus_single(
-    State(state): State<SharedState>,
-    Path((_server, login_bonus_id)): Path<(String, i64)>,
-) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_entry(
-        &state,
-        "loginbonus-master",
-        &state.client.login_bonus_master_url(cfg),
-        &LOGIN_BONUS_LIST_SCHEMA,
-        "loginBonusId",
-        login_bonus_id,
-        "login bonus",
-    )
-    .await
-}
-
-/// GET /api/{server}/costumes — costume master list.
-pub async fn costume_master(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_list(&state, "costume-master", &state.client.costume_master_url(cfg), &COSTUME_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/costumes/{costume_id} — one costume.
-pub async fn costume_single(
-    State(state): State<SharedState>,
-    Path((_server, costume_id)): Path<(String, i64)>,
-) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_entry(
-        &state,
-        "costume-master",
-        &state.client.costume_master_url(cfg),
-        &COSTUME_LIST_SCHEMA,
-        "costumeId",
-        costume_id,
-        "costume",
-    )
-    .await
-}
-
-/// GET /api/{server}/shops — shop master list.
-pub async fn shops(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_list(&state, "shop-master", &state.client.shop_url(cfg), &SHOP_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/shops/{shop_id} — one shop.
-pub async fn shop_single(State(state): State<SharedState>, Path((_server, shop_id)): Path<(String, i64)>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_entry(&state, "shop-master", &state.client.shop_url(cfg), &SHOP_LIST_SCHEMA, "shopId", shop_id, "shop").await
-}
-
-/// GET /api/{server}/cards — card master list. The game serves cards under the
-/// internal name `situation`, so this maps to the situation master URL.
-pub async fn cards(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_list(&state, "situation-master", &state.client.situation_master_url(cfg), &SITUATION_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/cards/{card_id} — one card from the situation master.
-pub async fn card_single(State(state): State<SharedState>, Path((_server, card_id)): Path<(String, i64)>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    master_entry(
-        &state,
-        "situation-master",
-        &state.client.situation_master_url(cfg),
-        &SITUATION_LIST_SCHEMA,
-        "situationId",
-        card_id,
-        "card",
-    )
-    .await
-}
-
 // ============================================================================
 // User data
 // ============================================================================
 
-/// GET /api/{server}/user/profile — the configured user's profile and stats.
-pub async fn user_profile(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-profile:{}", cfg.uid);
-    user_fetch(&state, &key, &state.client.user_profile_url(cfg), &USER_PROFILE_RESPONSE_SCHEMA).await
-}
-
-/// GET /api/{server}/user/decks — the configured user's decks.
-pub async fn user_decks(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-decks:{}", cfg.uid);
-    user_list(&state, &key, &state.client.user_deck_url(cfg), &USER_DECK_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/user/situations — the configured user's owned cards.
-pub async fn user_situations(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-situations:{}", cfg.uid);
-    user_list(&state, &key, &state.client.user_situation_url(cfg), &USER_SITUATION_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/user/title — the configured user's equipped title.
-pub async fn user_title(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-title:{}", cfg.uid);
-    user_fetch(&state, &key, &state.client.user_title_url(cfg), &USER_TITLE_SCHEMA).await
-}
-
-/// GET /api/{server}/user/stamps — the configured user's stamps.
-pub async fn user_stamps(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-stamps:{}", cfg.uid);
-    user_list(&state, &key, &state.client.user_stamp_url(cfg), &USER_STAMP_LIST_SCHEMA).await
+user_handlers! {
+    /// GET /api/{server}/user/profile — profile and stats.
+    user_profile => ("user-profile", user_profile_url, USER_PROFILE_RESPONSE_SCHEMA);
+    /// GET /api/{server}/user/decks — decks.
+    user_decks => ("user-decks", user_deck_url, USER_DECK_LIST_SCHEMA);
+    /// GET /api/{server}/user/situations — owned cards.
+    user_situations => ("user-situations", user_situation_url, USER_SITUATION_LIST_SCHEMA);
+    /// GET /api/{server}/user/title — equipped title.
+    user_title => ("user-title", user_title_url, USER_TITLE_SCHEMA);
+    /// GET /api/{server}/user/stamps — owned stamps.
+    user_stamps => ("user-stamps", user_stamp_url, USER_STAMP_LIST_SCHEMA);
+    /// GET /api/{server}/user/items — item balances.
+    user_items => ("user-items", user_item_url, USER_ITEM_LIST_SCHEMA);
+    /// GET /api/{server}/user/presents — presents and box information.
+    user_presents => ("user-presents", user_present_url, USER_PRESENT_LIST_SCHEMA);
+    /// GET /api/{server}/user/gacha — gacha records.
+    user_gacha => ("user-gacha", user_gacha_url, USER_GACHA_LIST_SCHEMA);
+    /// GET /api/{server}/user/episodes — unlocked episodes.
+    user_episodes => ("user-episodes", user_episode_url, USER_EPISODE_LIST_SCHEMA);
+    /// GET /api/{server}/user/missions — mission progress.
+    user_missions => ("user-missions", user_mission_url, USER_MISSION_LIST_SCHEMA);
+    /// GET /api/{server}/user/login-bonuses — login bonus progress.
+    user_login_bonuses => ("user-login-bonuses", user_login_bonus_url, USER_LOGIN_BONUS_LIST_SCHEMA);
+    /// GET /api/{server}/user/costumes — owned costumes.
+    user_costumes => ("user-costumes", user_costume_url, USER_COSTUME_LIST_SCHEMA);
+    /// GET /api/{server}/user/area-statuses — raw area status records.
+    user_area_statuses => ("user-area-statuses", user_area_url, USER_AREA_LIST_SCHEMA);
+    /// GET /api/{server}/user/character-affinity — character affinity records.
+    user_character_affinity => ("user-character-affinity", user_character_url, USER_CHARACTER_LIST_SCHEMA);
 }
 
 /// GET /api/{server}/user/areas — enabled area items with category and level.
@@ -991,7 +914,8 @@ pub async fn user_areas(State(state): State<SharedState>) -> AppResult<Response>
 pub async fn user_music_scores(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
     let root = suite_user_value(&state, &format!("suite-user:{}", cfg.uid)).await?;
-    Ok(json_response(json!({ "entries": suite_music_score_entries(&root) }).to_string()))
+    let entries = flatten_nested_map_values(&root, "userMusicScoreMap", "musicId");
+    Ok(json_response(json!({ "entries": entries }).to_string()))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1032,56 +956,9 @@ pub async fn user_music_status(
 pub async fn user_music_clear_info(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
     let root = suite_user_value(&state, &format!("suite-user:{}", cfg.uid)).await?;
-    Ok(json_response(suite_map_values(&root, "userMusicClearInfoMap", Some("difficulty")).to_string()))
-}
-
-/// GET /api/{server}/user/items — the configured user's item balances.
-pub async fn user_items(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-items:{}", cfg.uid);
-    user_list(&state, &key, &state.client.user_item_url(cfg), &USER_ITEM_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/user/presents — the configured user's presents.
-pub async fn user_presents(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-presents:{}", cfg.uid);
-    user_list(&state, &key, &state.client.user_present_url(cfg), &USER_PRESENT_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/user/gacha — the configured user's gacha records.
-pub async fn user_gacha(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-gacha:{}", cfg.uid);
-    user_list(&state, &key, &state.client.user_gacha_url(cfg), &USER_GACHA_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/user/episodes — the configured user's unlocked episodes.
-pub async fn user_episodes(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-episodes:{}", cfg.uid);
-    user_list(&state, &key, &state.client.user_episode_url(cfg), &USER_EPISODE_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/user/missions — the configured user's mission progress.
-pub async fn user_missions(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-missions:{}", cfg.uid);
-    user_list(&state, &key, &state.client.user_mission_url(cfg), &USER_MISSION_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/user/login-bonuses — the configured user's login bonus progress.
-pub async fn user_login_bonuses(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-login-bonuses:{}", cfg.uid);
-    user_list(&state, &key, &state.client.user_login_bonus_url(cfg), &USER_LOGIN_BONUS_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/user/costumes — the configured user's owned costumes.
-pub async fn user_costumes(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-costumes:{}", cfg.uid);
-    user_list(&state, &key, &state.client.user_costume_url(cfg), &USER_COSTUME_LIST_SCHEMA).await
+    Ok(json_response(
+        suite_map_values(&root, "userMusicClearInfoMap", Some("difficulty")).to_string(),
+    ))
 }
 
 /// GET /api/{server}/user/characters — character rank, experience and potential.
@@ -1095,41 +972,8 @@ pub async fn user_characters(State(state): State<SharedState>) -> AppResult<Resp
 pub async fn user_character_mission_bonuses(State(state): State<SharedState>) -> AppResult<Response> {
     let cfg = jp_config(&state)?;
     let root = suite_user_value(&state, &format!("suite-user:{}", cfg.uid)).await?;
-    Ok(json_response(json!({ "entries": suite_character_mission_bonus_entries(&root) }).to_string()))
-}
-
-/// GET /api/{server}/user/area-statuses — raw area status records.
-pub async fn user_area_statuses(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-area-statuses:{}", cfg.uid);
-    user_list(&state, &key, &state.client.user_area_url(cfg), &USER_AREA_LIST_SCHEMA).await
-}
-
-/// GET /api/{server}/user/character-affinity — character affinity records.
-pub async fn user_character_affinity(State(state): State<SharedState>) -> AppResult<Response> {
-    let cfg = jp_config(&state)?;
-    let key = format!("user-character-affinity:{}", cfg.uid);
-    user_list(&state, &key, &state.client.user_character_url(cfg), &USER_CHARACTER_LIST_SCHEMA).await
-}
-
-// ============================================================================
-// Static resources
-// ============================================================================
-
-/// GET /image/{server}/{asset_kind}/{asset_id} — placeholder for any static
-/// asset. The game API exposes no static-serving endpoints, so this route never
-/// fetches real bytes; it confirms the resource identity and signals that the
-/// content is not served.
-pub async fn image_placeholder(
-    Path((server, asset_kind, asset_id)): Path<(String, String, String)>,
-) -> AppResult<Json<Value>> {
-    resolve_server(&server)?;
-    Ok(Json(json!({
-        "placeholder": true,
-        "assetKind": asset_kind,
-        "assetId": asset_id,
-        "message": "static resources are not served",
-    })))
+    let entries = flatten_nested_map_values(&root, "userCharacterMissionBonusMap", "characterId");
+    Ok(json_response(json!({ "entries": entries }).to_string()))
 }
 
 // ============================================================================
@@ -1149,8 +993,22 @@ pub async fn cache_clear(State(state): State<SharedState>) -> Json<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{suite_music_score_entries, suite_music_status_value};
+    use super::{flatten_map_values, flatten_nested_map_values, suite_music_status_value};
     use serde_json::json;
+
+    #[test]
+    fn map_values_keep_existing_ids_and_fill_missing_ids() {
+        let root = json!({
+            "entries": [
+                {"key": 10, "value": {"areaItemId": 99, "areaItemName": "keep-value"}},
+                {"key": 20, "value": {"areaItemName": "use-map-key"}}
+            ]
+        });
+
+        let flattened = flatten_map_values(&root, Some("areaItemId"), false);
+        assert_eq!(flattened["entries"][0]["areaItemId"], json!(99));
+        assert_eq!(flattened["entries"][1]["areaItemId"], json!(20));
+    }
 
     #[test]
     fn music_status_reports_ap_as_fc_and_ap() {
@@ -1217,7 +1075,7 @@ mod tests {
             }
         });
 
-        let entries = suite_music_score_entries(&root);
+        let entries = flatten_nested_map_values(&root, "userMusicScoreMap", "musicId");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0]["musicId"], json!(456));
     }

@@ -69,14 +69,10 @@ pub struct Config {
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    #[error("{0}")]
-    Message(String),
     #[error("missing required field: {0}")]
     MissingField(&'static str),
-    #[error("encryption key must be exactly 16 bytes: {0}")]
-    KeyLength(String),
-    #[error("encryption IV must be exactly 16 bytes: {0}")]
-    IvLength(String),
+    #[error("{field} must be exactly 16 bytes, got {length}")]
+    CipherLength { field: &'static str, length: usize },
 }
 
 fn to_string(raw: Option<String>, fallback: &str) -> String {
@@ -86,12 +82,8 @@ fn to_string(raw: Option<String>, fallback: &str) -> String {
     }
 }
 
-fn to_u64(raw: Option<String>, fallback: u64) -> u64 {
-    raw.and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(fallback)
-}
-
-fn to_u16(raw: Option<String>, fallback: u16) -> u16 {
-    raw.and_then(|v| v.trim().parse::<u16>().ok()).unwrap_or(fallback)
+fn parse_or<T: std::str::FromStr>(raw: Option<String>, fallback: T) -> T {
+    raw.and_then(|value| value.trim().parse().ok()).unwrap_or(fallback)
 }
 
 /// Converts a raw server base into the canonical Garupa API base URL.
@@ -116,10 +108,13 @@ fn to_base_url(raw: &str) -> String {
 }
 
 /// Converts a string to a 16-byte cipher key or IV.
-fn to_cipher_bytes(raw: &str, label: &str) -> Result<Vec<u8>, ConfigError> {
+fn to_cipher_bytes(raw: &str, field: &'static str) -> Result<Vec<u8>, ConfigError> {
     let bytes = raw.trim().as_bytes().to_vec();
     if bytes.len() != 16 {
-        return Err(ConfigError::Message(format!("{label} must be 16 bytes, got {}", bytes.len())));
+        return Err(ConfigError::CipherLength {
+            field,
+            length: bytes.len(),
+        });
     }
     Ok(bytes)
 }
@@ -164,16 +159,8 @@ impl Config {
             if iv_raw.is_empty() {
                 return Err(ConfigError::MissingField("GARUPA_ENCRYPTION_IVS"));
             }
-            let encryption_key = to_cipher_bytes(&key_raw, "GARUPA_ENCRYPTION_KEYS")
-                .map_err(|e| match e {
-                    ConfigError::Message(m) => ConfigError::KeyLength(m),
-                    other => other,
-                })?;
-            let encryption_iv = to_cipher_bytes(&iv_raw, "GARUPA_ENCRYPTION_IVS")
-                .map_err(|e| match e {
-                    ConfigError::Message(m) => ConfigError::IvLength(m),
-                    other => other,
-                })?;
+            let encryption_key = to_cipher_bytes(&key_raw, "GARUPA_ENCRYPTION_KEYS")?;
+            let encryption_iv = to_cipher_bytes(&iv_raw, "GARUPA_ENCRYPTION_IVS")?;
 
             let client_version = to_string(env::var("GARUPA_CLIENT_VERSIONS").ok(), "10.1.3");
             let unity_version = to_string(env::var("GARUPA_UNITY_VERSIONS").ok(), "2021.3.45f2");
@@ -200,14 +187,14 @@ impl Config {
         Ok(Config {
             server,
             host: to_string(env::var("HOST").ok(), "127.0.0.1"),
-            port: to_u16(env::var("PORT").ok(), 8080),
+            port: parse_or(env::var("PORT").ok(), 8080),
             api_prefix: to_string(env::var("API_PREFIX").ok(), "/api"),
             log_level: to_string(env::var("LOG_LEVEL").ok(), "info"),
-            http_timeout_ms: to_u64(env::var("GARUPA_HTTP_TIMEOUT_MS").ok(), 10_000),
-            cache_ttl_ranking_secs: to_u64(env::var("GARUPA_CACHE_TTL_RANKING").ok(), 30),
-            cache_ttl_master_secs: to_u64(env::var("GARUPA_CACHE_TTL_MASTER").ok(), 3600),
-            cache_ttl_user_secs: to_u64(env::var("GARUPA_CACHE_TTL_USER").ok(), 300),
-            version_ttl_secs: to_u64(env::var("GARUPA_VERSION_TTL_SECONDS").ok(), 3600),
+            http_timeout_ms: parse_or(env::var("GARUPA_HTTP_TIMEOUT_MS").ok(), 10_000),
+            cache_ttl_ranking_secs: parse_or(env::var("GARUPA_CACHE_TTL_RANKING").ok(), 30),
+            cache_ttl_master_secs: parse_or(env::var("GARUPA_CACHE_TTL_MASTER").ok(), 3600),
+            cache_ttl_user_secs: parse_or(env::var("GARUPA_CACHE_TTL_USER").ok(), 300),
+            version_ttl_secs: parse_or(env::var("GARUPA_VERSION_TTL_SECONDS").ok(), 3600),
             api_key: to_string(env::var("API_KEY").ok(), ""),
         })
     }

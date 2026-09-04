@@ -15,12 +15,27 @@ pub fn build(state: SharedState) -> Router {
 
     let api = Router::new()
         .route("/{server}/application", get(handlers::application))
+        .route("/{server}/master-suite", get(handlers::master_suite))
         .route("/{server}/shops", get(handlers::shops))
         .route("/{server}/shops/{shop_id}", get(handlers::shop_single))
         .route("/{server}/cards", get(handlers::cards))
         .route("/{server}/cards/{card_id}", get(handlers::card_single))
         .route("/{server}/music", get(handlers::music_master))
         .route("/{server}/music/{music_id}", get(handlers::music_single))
+        .route("/{server}/music/{music_id}/difficulties", get(handlers::music_difficulties))
+        .route("/{server}/music-difficulties", get(handlers::music_difficulty_master))
+        .route("/{server}/multi-live-difficulties", get(handlers::multi_live_difficulty_master))
+        .route(
+            "/{server}/weekly-multi-live-difficulties",
+            get(handlers::weekly_multi_live_difficulty_master),
+        )
+        .route("/{server}/music-shops", get(handlers::music_shop_master))
+        .route("/{server}/area-items", get(handlers::area_item_master))
+        .route("/{server}/area-item-spawns", get(handlers::area_item_spawn_master))
+        .route("/{server}/bonds", get(handlers::bonds_master))
+        .route("/{server}/bond-effects", get(handlers::bonds_effect_master))
+        .route("/{server}/action-sets", get(handlers::action_set_master))
+        .route("/{server}/degrees", get(handlers::degree_master))
         .route("/{server}/characters", get(handlers::character_master))
         .route("/{server}/characters/{character_id}/cards", get(handlers::character_cards))
         .route("/{server}/characters/{character_id}/costumes", get(handlers::character_costumes))
@@ -51,7 +66,10 @@ pub fn build(state: SharedState) -> Router {
         .route("/{server}/monthly-ranking/{monthly_id}", get(handlers::monthly_ranking_full))
         .route("/{server}/monthly-ranking/{monthly_id}/info", get(handlers::monthly_ranking_info))
         .route("/{server}/monthly-ranking/{monthly_id}/top", get(handlers::monthly_ranking_top))
-        .route("/{server}/monthly-ranking/{monthly_id}/border", get(handlers::monthly_ranking_border))
+        .route(
+            "/{server}/monthly-ranking/{monthly_id}/border",
+            get(handlers::monthly_ranking_border),
+        )
         .route("/{server}/user/profile", get(handlers::user_profile))
         .route("/{server}/user/decks", get(handlers::user_decks))
         .route("/{server}/user/situations", get(handlers::user_situations))
@@ -69,7 +87,10 @@ pub fn build(state: SharedState) -> Router {
         .route("/{server}/user/login-bonuses", get(handlers::user_login_bonuses))
         .route("/{server}/user/costumes", get(handlers::user_costumes))
         .route("/{server}/user/characters", get(handlers::user_characters))
-        .route("/{server}/user/character-mission-bonuses", get(handlers::user_character_mission_bonuses))
+        .route(
+            "/{server}/user/character-mission-bonuses",
+            get(handlers::user_character_mission_bonuses),
+        )
         .route("/{server}/user/area-statuses", get(handlers::user_area_statuses))
         .route("/{server}/user/character-affinity", get(handlers::user_character_affinity))
         .route("/{server}/cache", get(handlers::cache_stats).delete(handlers::cache_clear))
@@ -81,7 +102,6 @@ pub fn build(state: SharedState) -> Router {
         .route("/servers", get(handlers::servers))
         .route("/health", get(handlers::health))
         .route("/version", get(handlers::version))
-        .route("/image/{server}/{asset_kind}/{asset_id}", get(handlers::image_placeholder))
         .nest(&api_prefix, api)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())

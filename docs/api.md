@@ -20,7 +20,6 @@ curl -H "Authorization: Bearer your-secret-key" http://127.0.0.1:8080/api/jp/mon
 ```bash
 curl http://127.0.0.1:8080/api/jp/music
 # 400: {"result":"failed","status":400,"message":"unsupported server \"en\", only \"jp\" is configured"}
-curl http://127.0.0.1:8080/api/en/music
 ```
 
 ## 响应格式
@@ -37,7 +36,6 @@ curl http://127.0.0.1:8080/api/en/music
 | GET | `/servers` | 已配置的服务器列表，不含密钥与 UID |
 | GET | `/health` | 进程健康检查，含版本、运行时长、日服可用性与客户端版本 |
 | GET | `/version` | 自动探测到的游戏客户端版本 |
-| GET | `/image/{server}/{asset_kind}/{asset_id}` | 静态资源占位路由 |
 
 ### 月榜
 
@@ -62,8 +60,20 @@ curl http://127.0.0.1:8080/api/en/music
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/{server}/application` | 应用版本、服务器状态、各平台维护状态 |
+| GET | `/api/{server}/master-suite` | 官方完整主数据快照中的精选字段，包含谱面、多人 live、区域道具、羁绊、动作、兑换与称号数据 |
 | GET | `/api/{server}/music` | 乐曲主数据 |
 | GET | `/api/{server}/music/{music_id}` | 单曲主数据 |
+| GET | `/api/{server}/music-difficulties` | 全部歌曲难度、等级、音符数与 S/SS/SSS 分数线 |
+| GET | `/api/{server}/music/{music_id}/difficulties` | 指定歌曲的难度与多人 live 分数线 |
+| GET | `/api/{server}/multi-live-difficulties` | 多人 live 难度的属性要求、倍率与类型 |
+| GET | `/api/{server}/weekly-multi-live-difficulties` | 每周多人 live 难度规则 |
+| GET | `/api/{server}/music-shops` | 歌曲兑换条目、兑换数量与资源消耗 |
+| GET | `/api/{server}/area-items` | 区域道具属性、加成目标与适用角色/乐队 |
+| GET | `/api/{server}/area-item-spawns` | 区域道具摆放点 |
+| GET | `/api/{server}/bonds` | 角色羁绊、关联角色与等级解锁 |
+| GET | `/api/{server}/bond-effects` | 羁绊提供的生命值、能力值与技能加成 |
+| GET | `/api/{server}/action-sets` | 区域动作及其角色/道具关联 |
+| GET | `/api/{server}/degrees` | 玩家资料称号/徽章主数据 |
 | GET | `/api/{server}/characters` | 角色主数据，含人物设定、服装季、语音、Live2D 服装 |
 | GET | `/api/{server}/characters/{character_id}` | 单角色主数据 |
 | GET | `/api/{server}/characters/{character_id}/cards` | 角色对应的卡列表 |
@@ -91,6 +101,11 @@ curl http://127.0.0.1:8080/api/en/music
 | GET | `/api/{server}/shops/{shop_id}` | 单个商店主数据 |
 | GET | `/api/{server}/cards` | 卡主数据，含各等级能力值、技能引用、`episodes` 卡面剧情与 `training` 特训数据 |
 | GET | `/api/{server}/cards/{card_id}` | 单张卡主数据 |
+
+map 型主数据接口统一返回 `{"entries": [...]}`，并把游戏内部的 map key
+补到对象的 `areaItemId`、`bondsId`、`bondsEffectId`、`actionSetId`、`musicShopId`、
+`degreeId` 或 `spawnPoint` 字段。`master-suite` 返回同一批数据的分组对象；它只保留当前
+已确认的高价值字段，未知的游戏内部字段不会透传。
 
 #### 规范化技能
 
@@ -126,7 +141,6 @@ curl http://127.0.0.1:8080/api/en/music
 - 当前只连接日服，因此本地化对象暂时只有 `jp`。以后增加其他服务器时无需改变字段类型。
 - `skillType` 是当前上游唯一可靠的结构化效果类型。接口不会根据描述文本猜测
   Bestdori 风格的 `activationEffect`、发动条件或 `onceEffect`。
-
 
 ### 用户数据
 

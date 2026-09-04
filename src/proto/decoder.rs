@@ -10,9 +10,8 @@
 
 use std::collections::HashMap;
 
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine as _;
 use serde_json::{Map, Value};
+use thiserror::Error;
 
 use super::schema::{ProtoType, Schema};
 
@@ -37,16 +36,9 @@ struct RawField {
     data: RawData,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{0}")]
 pub struct ProtoError(pub String);
-
-impl std::fmt::Display for ProtoError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for ProtoError {}
 
 /// Reads a base-128 varint from `buf` starting at `offset`.
 /// Returns the decoded value and the new offset, or `None` on truncation or overflow.
@@ -100,7 +92,11 @@ fn parse_raw_fields(buf: &[u8]) -> Vec<RawField> {
                     None => break,
                 };
                 offset = new_offset;
-                results.push(RawField { field, wire_type: WireType::Varint, data: RawData::Varint(value) });
+                results.push(RawField {
+                    field,
+                    wire_type: WireType::Varint,
+                    data: RawData::Varint(value),
+                });
             }
             2 => {
                 let (len, new_offset) = match read_varint(buf, offset) {
@@ -114,7 +110,11 @@ fn parse_raw_fields(buf: &[u8]) -> Vec<RawField> {
                 }
                 let inner = buf[offset..offset + len].to_vec();
                 offset += len;
-                results.push(RawField { field, wire_type: WireType::LengthDelimited, data: RawData::Bytes(inner) });
+                results.push(RawField {
+                    field,
+                    wire_type: WireType::LengthDelimited,
+                    data: RawData::Bytes(inner),
+                });
             }
             1 => {
                 if offset + 8 > buf.len() {
@@ -122,7 +122,11 @@ fn parse_raw_fields(buf: &[u8]) -> Vec<RawField> {
                 }
                 let inner = buf[offset..offset + 8].to_vec();
                 offset += 8;
-                results.push(RawField { field, wire_type: WireType::Fixed64, data: RawData::Bytes(inner) });
+                results.push(RawField {
+                    field,
+                    wire_type: WireType::Fixed64,
+                    data: RawData::Bytes(inner),
+                });
             }
             5 => {
                 if offset + 4 > buf.len() {
@@ -130,7 +134,11 @@ fn parse_raw_fields(buf: &[u8]) -> Vec<RawField> {
                 }
                 let inner = buf[offset..offset + 4].to_vec();
                 offset += 4;
-                results.push(RawField { field, wire_type: WireType::Fixed32, data: RawData::Bytes(inner) });
+                results.push(RawField {
+                    field,
+                    wire_type: WireType::Fixed32,
+                    data: RawData::Bytes(inner),
+                });
             }
             _ => break,
         }
@@ -186,15 +194,6 @@ pub fn decode(buf: &[u8], schema: &Schema) -> Result<Value, ProtoError> {
                         _ => None,
                     }
                 }
-                ProtoType::Bytes => {
-                    if wt != WireType::LengthDelimited {
-                        return None;
-                    }
-                    match &item.data {
-                        RawData::Bytes(b) => Some(Value::String(BASE64.encode(b))),
-                        _ => None,
-                    }
-                }
                 ProtoType::Message(sub) => {
                     if wt != WireType::LengthDelimited {
                         return None;
@@ -204,25 +203,13 @@ pub fn decode(buf: &[u8], schema: &Schema) -> Result<Value, ProtoError> {
                         _ => None,
                     }
                 }
-                ProtoType::Double => {
-                    if wt != WireType::Fixed64 {
-                        return None;
-                    }
-                    match &item.data {
-                        RawData::Bytes(b) if b.len() == 8 => {
-                            let arr: [u8; 8] = b.clone().try_into().ok()?;
-                            Some(Value::from(f64::from_le_bytes(arr)))
-                        }
-                        _ => None,
-                    }
-                }
                 ProtoType::Float => {
                     if wt != WireType::Fixed32 {
                         return None;
                     }
                     match &item.data {
                         RawData::Bytes(b) if b.len() == 4 => {
-                            let arr: [u8; 4] = b.clone().try_into().ok()?;
+                            let arr: [u8; 4] = b.as_slice().try_into().ok()?;
                             Some(Value::from(f32::from_le_bytes(arr)))
                         }
                         _ => None,

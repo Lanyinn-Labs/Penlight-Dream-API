@@ -1,7 +1,8 @@
-use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use serde_json::json;
+use thiserror::Error;
 
 use crate::crypto::CryptoError;
 use crate::proto::decoder::ProtoError;
@@ -10,38 +11,31 @@ use crate::proto::decoder::ProtoError;
 ///
 /// Response bodies use the envelope:
 /// `{ "result": "failed", "status": <http status>, "message": <human readable message> }`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum AppError {
+    #[error("{0}")]
     NotFound(String),
+    #[error("{0}")]
     BadRequest(String),
     /// Missing or invalid API key.
+    #[error("{0}")]
     Unauthorized(String),
     /// The official Garupa API returned a non-2xx status.
+    #[error("upstream request failed (HTTP {0})")]
     Upstream(u16),
     /// Upstream request timed out or failed at the transport level.
+    #[error("{0}")]
     UpstreamError(String),
+    #[error("{0}")]
     Crypto(String),
+    #[error("{0}")]
     Proto(String),
+    #[error("{0}")]
     Json(String),
+    #[error("{0}")]
     Io(String),
+    #[error("{0}")]
     Internal(String),
-}
-
-impl std::fmt::Display for AppError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AppError::NotFound(m) => write!(f, "{m}"),
-            AppError::BadRequest(m) => write!(f, "{m}"),
-            AppError::Unauthorized(m) => write!(f, "{m}"),
-            AppError::Upstream(code) => write!(f, "upstream request failed (HTTP {code})"),
-            AppError::UpstreamError(m) => write!(f, "{m}"),
-            AppError::Crypto(m) => write!(f, "{m}"),
-            AppError::Proto(m) => write!(f, "{m}"),
-            AppError::Json(m) => write!(f, "{m}"),
-            AppError::Io(m) => write!(f, "{m}"),
-            AppError::Internal(m) => write!(f, "{m}"),
-        }
-    }
 }
 
 impl AppError {
@@ -98,10 +92,7 @@ impl IntoResponse for AppError {
             AppError::NotFound(m) => (StatusCode::NOT_FOUND, m),
             AppError::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
             AppError::Unauthorized(m) => (StatusCode::UNAUTHORIZED, m),
-            AppError::Upstream(code) => (
-                StatusCode::BAD_GATEWAY,
-                format!("Upstream request failed (HTTP {code})"),
-            ),
+            AppError::Upstream(code) => (StatusCode::BAD_GATEWAY, format!("Upstream request failed (HTTP {code})")),
             AppError::UpstreamError(m) => (StatusCode::BAD_GATEWAY, m),
             AppError::Crypto(m) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Decryption error: {m}")),
             AppError::Proto(m) => (StatusCode::BAD_GATEWAY, format!("Protobuf parse error: {m}")),

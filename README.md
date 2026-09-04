@@ -19,7 +19,6 @@ cargo build --release
 
 ## Docker 部署
 
-
 ```bash
 # 方式一：docker compose，复用根目录 .env 中的凭据
 docker compose up -d --build
@@ -47,7 +46,6 @@ curl http://127.0.0.1:8080/health
 ## 免责声明
 
 本项目仅供学习与研究，与 Craft Egg / Bushiroad 无关。请勿滥用官方 API，注意请求频率；爬取数据仅供个人研究使用。
-
 
 ## License
 

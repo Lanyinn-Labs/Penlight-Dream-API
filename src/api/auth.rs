@@ -22,26 +22,21 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 }
 
 pub async fn require_api_key(State(state): State<SharedState>, request: Request, next: Next) -> AppResult<Response> {
-    let expected = state.config.api_key.clone();
+    let expected = state.config.api_key.as_str();
     if expected.is_empty() {
         return Ok(next.run(request).await);
     }
 
-    let provided = request
-        .headers()
-        .get("X-API-Key")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
-        .or_else(|| {
-            request
-                .headers()
-                .get("Authorization")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|auth| auth.strip_prefix("Bearer "))
-                .map(|rest| rest.trim().to_string())
-        });
+    let provided = request.headers().get("X-API-Key").and_then(|v| v.to_str().ok()).or_else(|| {
+        request
+            .headers()
+            .get("Authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|auth| auth.strip_prefix("Bearer "))
+            .map(str::trim)
+    });
 
-    if provided.as_deref().is_some_and(|p| constant_time_eq(p, &expected)) {
+    if provided.is_some_and(|provided| constant_time_eq(provided, expected)) {
         Ok(next.run(request).await)
     } else {
         Err(AppError::unauthorized("invalid or missing API key"))

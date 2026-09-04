@@ -61,18 +61,10 @@ pub fn skill_list(root: &Value) -> Vec<SkillInfo> {
     };
 
     for entry in entries {
-        let Some(skill_id) = entry
-            .get("skillId")
-            .and_then(Value::as_i64)
-            .filter(|id| *id > 0)
-        else {
+        let Some(skill_id) = entry.get("skillId").and_then(Value::as_i64).filter(|id| *id > 0) else {
             continue;
         };
-        let Some(skill_level) = entry
-            .get("skillLevel")
-            .and_then(Value::as_i64)
-            .filter(|level| *level > 0)
-        else {
+        let Some(skill_level) = entry.get("skillLevel").and_then(Value::as_i64).filter(|level| *level > 0) else {
             continue;
         };
 
@@ -83,10 +75,7 @@ pub fn skill_list(root: &Value) -> Vec<SkillInfo> {
             description: str_of(entry, "description"),
             skill_type: str_of(entry, "skillType"),
         };
-        grouped
-            .entry(skill_id)
-            .or_default()
-            .insert(skill_level, candidate);
+        grouped.entry(skill_id).or_default().insert(skill_level, candidate);
     }
 
     grouped
@@ -168,21 +157,18 @@ fn parse_user(v: &Value) -> RankingUser {
     let view_status = profile.and_then(|p| p.get("viewProfileSituationStatus")).and_then(Value::as_str);
 
     let (sid, strained) = if view_status == Some("profile_situation") {
-        let p = profile.unwrap_or(&Value::Null);
-        let sid = i64_of(p, "situationId");
-        let strained = if str_of(p, "illust") == "after_training" { 1 } else { 0 };
+        let sid = profile.map(|profile| i64_of(profile, "situationId")).unwrap_or(0);
+        let strained = i64::from(profile.and_then(|profile| profile.get("illust")).and_then(Value::as_str) == Some("after_training"));
         (sid, strained)
     } else {
         let deck_leader = v.get("userDeck").and_then(|d| d.get("leader")).and_then(Value::as_i64).unwrap_or(0);
         if deck_leader > 0 {
-            let entries = v
+            let leader_card = v
                 .get("userSituationList")
                 .and_then(|l| l.get("entries"))
                 .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            let leader_card = entries.iter().find(|e| i64_of(e, "situationId") == deck_leader);
-            let strained = if leader_card.map(|c| str_of(c, "illust") == "after_training").unwrap_or(false) { 1 } else { 0 };
+                .and_then(|entries| entries.iter().find(|entry| i64_of(entry, "situationId") == deck_leader));
+            let strained = i64::from(leader_card.and_then(|card| card.get("illust")).and_then(Value::as_str) == Some("after_training"));
             (deck_leader, strained)
         } else {
             (1, 0)
@@ -193,7 +179,12 @@ fn parse_user(v: &Value) -> RankingUser {
         .get("userProfileDegreeMap")
         .and_then(|m| m.get("entries"))
         .and_then(Value::as_array)
-        .map(|arr| arr.iter().map(|e| i64_of(e.get("value").unwrap_or(&Value::Null), "degreeId")).collect())
+        .map(|entries| {
+            entries
+                .iter()
+                .map(|entry| entry.get("value").map(|value| i64_of(value, "degreeId")).unwrap_or(0))
+                .collect()
+        })
         .unwrap_or_default();
 
     RankingUser {
@@ -303,8 +294,16 @@ pub fn monthly_ranking_list(root: &Value) -> Vec<MonthlyRankingInfo> {
                     distribution_end_at: i64_of(e, "distributionEndAt"),
                     reception_end_at: i64_of(e, "receptionEndAt"),
                     aggregate_end_at: i64_of(e, "aggregateEndAt"),
-                    rewards: e.get("rewards").and_then(Value::as_array).map(|arr| parse_rewards(arr)).unwrap_or_default(),
-                    grades: e.get("grades").and_then(Value::as_array).map(|arr| parse_grades(arr)).unwrap_or_default(),
+                    rewards: e
+                        .get("rewards")
+                        .and_then(Value::as_array)
+                        .map(|arr| parse_rewards(arr))
+                        .unwrap_or_default(),
+                    grades: e
+                        .get("grades")
+                        .and_then(Value::as_array)
+                        .map(|arr| parse_grades(arr))
+                        .unwrap_or_default(),
                 })
                 .collect()
         })
@@ -479,8 +478,16 @@ pub fn event_list(root: &Value) -> Vec<EventInfo> {
                     event_exchanges_end_at: i64_of(e, "eventExchangesEndAt"),
                     reception_end_at: i64_of(e, "receptionEndAt"),
                     previous_event_id: i64_of(e, "previousEventId"),
-                    point_rewards: e.get("pointRewards").and_then(Value::as_array).map(|arr| parse_point_rewards(arr)).unwrap_or_default(),
-                    ranking_rewards: e.get("rankingRewards").and_then(Value::as_array).map(|arr| parse_ranking_rewards(arr)).unwrap_or_default(),
+                    point_rewards: e
+                        .get("pointRewards")
+                        .and_then(Value::as_array)
+                        .map(|arr| parse_point_rewards(arr))
+                        .unwrap_or_default(),
+                    ranking_rewards: e
+                        .get("rankingRewards")
+                        .and_then(Value::as_array)
+                        .map(|arr| parse_ranking_rewards(arr))
+                        .unwrap_or_default(),
                 })
                 .collect()
         })

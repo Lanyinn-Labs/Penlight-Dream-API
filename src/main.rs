@@ -21,27 +21,27 @@ fn init_tracing(level: &str) {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
+fn unwrap_or_exit<T>(result: Result<T, impl std::fmt::Display>, context: &str) -> T {
+    result.unwrap_or_else(|error| {
+        eprintln!("{context} error: {error}");
+        std::process::exit(1);
+    })
+}
+
 #[tokio::main]
 async fn main() {
-    let config = match Config::from_env() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("configuration error: {e}");
-            std::process::exit(1);
-        }
-    };
+    let config = unwrap_or_exit(Config::from_env(), "configuration");
 
     init_tracing(&config.log_level);
 
-    let client = match GarupaClient::new(&config) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("client error: {e}");
-            std::process::exit(1);
-        }
-    };
+    let client = unwrap_or_exit(GarupaClient::new(&config), "client");
 
-    let state = Arc::new(AppState { config, client, cache: Cache::new(), coalescer: Coalescer::new() });
+    let state = Arc::new(AppState {
+        config,
+        client,
+        cache: Cache::new(),
+        coalescer: Coalescer::new(),
+    });
 
     if state.config.server.enabled() {
         info!("JP server configured");
@@ -52,9 +52,7 @@ async fn main() {
     let addr: SocketAddr = format!("{}:{}", state.config.host, state.config.port)
         .parse()
         .expect("invalid bind address");
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .expect("failed to bind listener");
+    let listener = tokio::net::TcpListener::bind(addr).await.expect("failed to bind listener");
     info!(%addr, "penlight-dream-api listening");
     info!(prefix = %state.config.api_prefix, "API prefix");
 

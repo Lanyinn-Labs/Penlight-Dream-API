@@ -22,7 +22,9 @@ struct Entry {
 
 impl Cache {
     pub fn new() -> Self {
-        Self { inner: RwLock::new(HashMap::new()) }
+        Self {
+            inner: RwLock::new(HashMap::new()),
+        }
     }
 
     /// Returns the cached body if present and not expired, evicting the
@@ -51,7 +53,13 @@ impl Cache {
     /// Stores a body with the given TTL.
     pub fn set(&self, key: &str, body: &str, ttl: Duration) {
         if let Ok(mut map) = self.inner.write() {
-            map.insert(key.to_string(), Entry { body: body.to_string(), expires_at: Instant::now() + ttl });
+            map.insert(
+                key.to_string(),
+                Entry {
+                    body: body.to_string(),
+                    expires_at: Instant::now() + ttl,
+                },
+            );
         }
     }
 
@@ -103,10 +111,7 @@ impl Coalescer {
     {
         let cell = {
             let mut inflight = self.inflight.lock().unwrap();
-            inflight
-                .entry(key.to_string())
-                .or_insert_with(|| Arc::new(OnceCell::new()))
-                .clone()
+            inflight.entry(key.to_string()).or_insert_with(|| Arc::new(OnceCell::new())).clone()
         };
         let outcome = cell.get_or_init(|| async { fetch().await }).await.clone();
         if let Ok(mut inflight) = self.inflight.lock() {

@@ -30,10 +30,7 @@ pub fn resolve_server(server: &str) -> AppResult<()> {
 /// stripped, so the server is always the leading segment.
 pub async fn validate_server(request: Request, next: Next) -> AppResult<Response> {
     let path = request.uri().path();
-    let server = path
-        .split('/')
-        .find(|s| !s.is_empty())
-        .unwrap_or_default();
+    let server = path.split('/').find(|s| !s.is_empty()).unwrap_or_default();
     resolve_server(server)?;
     Ok(next.run(request).await)
 }
