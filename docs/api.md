@@ -81,6 +81,7 @@ curl http://127.0.0.1:8080/api/jp/music
 | GET | `/api/{server}/bands` | 乐队主数据 |
 | GET | `/api/{server}/bands/{band_id}` | 单个乐队主数据 |
 | GET | `/api/{server}/bands/{band_id}/characters` | 乐队成员列表 |
+| GET | `/api/{server}/bands/{band_id}/cards` | 乐队所有成员的卡列表，按角色主数据关联卡片 |
 | GET | `/api/{server}/areas` | 区域主数据 |
 | GET | `/api/{server}/areas/{area_id}` | 单个区域主数据 |
 | GET | `/api/{server}/gacha` | 卡池主数据 |
@@ -101,6 +102,14 @@ curl http://127.0.0.1:8080/api/jp/music
 | GET | `/api/{server}/shops/{shop_id}` | 单个商店主数据 |
 | GET | `/api/{server}/cards` | 卡主数据，含各等级能力值、技能引用、`episodes` 卡面剧情与 `training` 特训数据 |
 | GET | `/api/{server}/cards/{card_id}` | 单张卡主数据 |
+| GET | `/api/{server}/cards/{card_id}/levels` | 单张卡各等级能力值，返回 `{"entries": [...]}` |
+| GET | `/api/{server}/cards/{card_id}/episodes` | 单张卡的剧情元数据、属性加成及奖励，返回 `{"entries": [...]}` |
+| GET | `/api/{server}/cards/{card_id}/training` | 单张卡的特训等级、属性加成及奖励，返回对象 |
+
+卡不存在时返回 `404`；卡存在但
+缺少等级或剧情记录时返回 `{"entries": []}`，缺少特训数据时返回 `404`。
+乐队没有匹配成员时返回空列表。上述 ID 必须大于 0，否则返回 `400`。
+剧情接口提供元数据，不包含剧情脚本。
 
 map 型主数据接口统一返回 `{"entries": [...]}`，并把游戏内部的 map key
 补到对象的 `areaItemId`、`bondsId`、`bondsEffectId`、`actionSetId`、`musicShopId`、
@@ -155,6 +164,7 @@ map 型主数据接口统一返回 `{"entries": [...]}`，并把游戏内部的 
 | GET | `/api/{server}/user/stamps` | 用户表情 |
 | GET | `/api/{server}/user/areas` | 用户已启用区域道具，含 `areaItemCategory` 和 `level` |
 | GET | `/api/{server}/user/music-scores` | 用户所有已记录的歌曲/难度成绩 |
+| GET | `/api/{server}/user/music/{music_id}/scores` | 单曲所有已记录难度的原始成绩，未记录时返回 `{"entries": []}` |
 | GET | `/api/{server}/user/music/{music_id}/status?difficulty=expert` | 查询指定歌曲指定难度的通关、FC、AP 状态 |
 | GET | `/api/{server}/user/music-clear-info` | 按难度汇总通关、FC、AP 数量 |
 | GET | `/api/{server}/user/items` | 用户道具余额 |
@@ -183,8 +193,12 @@ map 型主数据接口统一返回 `{"entries": [...]}`，并把游戏内部的 
 `difficulty` 支持 `easy`、`normal`、`hard`、`expert`、`special`，例如：
 
 ```bash
+curl 'http://127.0.0.1:8080/api/jp/user/music/1/scores'
 curl 'http://127.0.0.1:8080/api/jp/user/music/1/status?difficulty=expert'
 ```
+
+单曲 `/scores` 不要求 `difficulty`。
+结果保持上游顺序，成绩条目缺失 `musicId` 时使用外层 map key 补齐；`music_id <= 0` 返回 `400`。
 
 响应示例：
 

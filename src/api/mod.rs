@@ -6,6 +6,9 @@ pub mod models;
 pub mod routes;
 pub mod server;
 
+#[cfg(test)]
+mod tests;
+
 use std::sync::Arc;
 
 use crate::cache::{Cache, Coalescer};

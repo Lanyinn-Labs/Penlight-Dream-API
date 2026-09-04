@@ -6,6 +6,7 @@ use std::io::Read;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use axum::body::Bytes;
 use bzip2::read::BzDecoder;
 use reqwest::header::{HeaderMap, HeaderValue};
 use tracing::warn;
@@ -103,7 +104,7 @@ pub struct GarupaClient {
 
 struct FetchRaw {
     status: u16,
-    body: Vec<u8>,
+    body: Bytes,
     encoding: Option<String>,
 }
 
@@ -139,11 +140,7 @@ impl GarupaClient {
             .bytes()
             .await
             .map_err(|e| AppError::UpstreamError(format!("failed to read upstream body: {e}")))?;
-        Ok(FetchRaw {
-            status,
-            body: body.to_vec(),
-            encoding,
-        })
+        Ok(FetchRaw { status, body, encoding })
     }
 
     /// Decrypts a response and applies Garupa's endpoint-specific compression.

@@ -27,8 +27,8 @@ pub fn decrypt_aes_128_cbc(key: &[u8], iv: &[u8], payload: &[u8]) -> Result<Vec<
 
     let mut buf = payload.to_vec();
     let decipher = Aes128CbcDec::new(key.into(), iv.into());
-    let out = decipher
+    decipher
         .decrypt_padded_mut::<NoPadding>(&mut buf)
         .map_err(|_| CryptoError::DecryptFailed)?;
-    Ok(out.to_vec())
+    Ok(buf)
 }

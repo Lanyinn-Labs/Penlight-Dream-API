@@ -2,10 +2,11 @@
 //! endpoint, decodes the protobuf, maps it to a response model, and serves it
 //! through the TTL cache.
 
+use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::header::{HeaderValue, CONTENT_TYPE};
 use axum::response::Response;
@@ -62,8 +63,8 @@ fn jp_config(state: &SharedState) -> AppResult<&ServerConfig> {
 // ============================================================================
 
 /// Builds a JSON response from a pre-serialized body.
-fn json_response(body: String) -> Response {
-    let mut response = Response::new(Body::from(body));
+fn json_response(body: impl Into<Bytes>) -> Response {
+    let mut response = Response::new(Body::from(body.into()));
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -80,8 +81,8 @@ async fn cached_json(
     ttl_secs: u64,
     url: &str,
     schema: &Schema,
-    map: impl Fn(&Value, &[u8]) -> AppResult<Value>,
-) -> AppResult<String> {
+    map: impl FnOnce(Value) -> AppResult<Value>,
+) -> AppResult<Bytes> {
     if let Some(cached) = state.cache.get(key) {
         return Ok(cached);
     }
@@ -89,24 +90,29 @@ async fn cached_json(
     state
         .coalescer
         .run(key, || async {
+            // A previous leader may have populated the cache between our
+            // initial lookup and joining this flight.
+            if let Some(cached) = state.cache.get(key) {
+                return Ok(cached);
+            }
             let buf = state.client.fetch(cfg, url).await?;
             let root = decode(&buf, schema)?;
-            let value = map(&root, &buf)?;
-            let body = value.to_string();
-            state.cache.set(key, &body, Duration::from_secs(ttl_secs));
+            let value = map(root)?;
+            let body = Bytes::from(serde_json::to_vec(&value)?);
+            state.cache.set(key, body.clone(), Duration::from_secs(ttl_secs));
             Ok(body)
         })
         .await
 }
 
 /// Passes a decoded response through unchanged.
-fn clone_root(root: &Value, _raw: &[u8]) -> AppResult<Value> {
-    Ok(root.clone())
+fn passthrough(root: Value) -> AppResult<Value> {
+    Ok(root)
 }
 
 /// Fetches a master endpoint and caches its decoded response.
 async fn master_response(state: &SharedState, key: &str, url: &str, schema: &Schema) -> AppResult<Response> {
-    let body = cached_json(state, key, state.config.cache_ttl_master_secs, url, schema, clone_root).await?;
+    let body = cached_json(state, key, state.config.cache_ttl_master_secs, url, schema, passthrough).await?;
     Ok(json_response(body))
 }
 
@@ -114,8 +120,8 @@ async fn master_response(state: &SharedState, key: &str, url: &str, schema: &Sch
 /// use the same cache key as their list endpoint, so adding derived views never
 /// creates an extra upstream request.
 async fn master_list_value(state: &SharedState, key: &str, url: &str, schema: &Schema) -> AppResult<Value> {
-    let body = cached_json(state, key, state.config.cache_ttl_master_secs, url, schema, clone_root).await?;
-    Ok(serde_json::from_str(&body)?)
+    let body = cached_json(state, key, state.config.cache_ttl_master_secs, url, schema, passthrough).await?;
+    Ok(serde_json::from_slice(&body)?)
 }
 
 /// Finds a single object in an entries-wrapped master list.
@@ -132,13 +138,15 @@ async fn master_entry(
         return Err(AppError::bad_request(format!("{id_field} must be >= 1")));
     }
     let root = master_list_value(state, key, url, schema).await?;
-    let entry = root
-        .get("entries")
+    let entry = find_entry(&root, id_field, id, resource_name)?;
+    Ok(json_response(entry.to_string()))
+}
+
+fn find_entry<'a>(root: &'a Value, id_field: &str, id: i64, resource_name: &str) -> AppResult<&'a Value> {
+    root.get("entries")
         .and_then(Value::as_array)
         .and_then(|entries| entries.iter().find(|entry| entry.get(id_field).and_then(Value::as_i64) == Some(id)))
-        .cloned()
-        .ok_or_else(|| AppError::not_found(format!("{resource_name} {id} not found")))?;
-    Ok(json_response(entry.to_string()))
+        .ok_or_else(|| AppError::not_found(format!("{resource_name} {id} not found")))
 }
 
 /// Builds an entries-wrapped derived view while preserving source order.
@@ -153,7 +161,7 @@ fn filtered_entries(root: &Value, predicate: impl Fn(&Value) -> bool) -> Value {
 
 /// Fetches a user endpoint and caches its decoded response.
 async fn user_response(state: &SharedState, key: &str, url: &str, schema: &Schema) -> AppResult<Response> {
-    let body = cached_json(state, key, state.config.cache_ttl_user_secs, url, schema, clone_root).await?;
+    let body = cached_json(state, key, state.config.cache_ttl_user_secs, url, schema, passthrough).await?;
     Ok(json_response(body))
 }
 
@@ -167,10 +175,10 @@ async fn suite_user_value(state: &SharedState, key: &str) -> AppResult<Value> {
         state.config.cache_ttl_user_secs,
         &state.client.suite_user_url(cfg),
         &SUITE_USER_RESPONSE_SCHEMA,
-        clone_root,
+        passthrough,
     )
     .await?;
-    Ok(serde_json::from_str(&body)?)
+    Ok(serde_json::from_slice(&body)?)
 }
 
 /// Converts a decoded protobuf map into the list form used by the public API.
@@ -213,8 +221,8 @@ fn suite_map_values(root: &Value, map_name: &str, key_name: Option<&str>) -> Val
 /// upstream map key is copied into the requested identifier field when the
 /// nested object does not contain one.
 async fn map_list(state: &SharedState, key: &str, url: &str, schema: &Schema, key_name: Option<&str>) -> AppResult<Response> {
-    let body = cached_json(state, key, state.config.cache_ttl_master_secs, url, schema, |root, _| {
-        Ok(flatten_map_values(root, key_name, false))
+    let body = cached_json(state, key, state.config.cache_ttl_master_secs, url, schema, |root| {
+        Ok(flatten_map_values(&root, key_name, false))
     })
     .await?;
     Ok(json_response(body))
@@ -338,13 +346,9 @@ fn normalize_music_difficulty(raw: &str) -> Option<&'static str> {
 /// that song/difficulty; they are represented as an unplayed result rather
 /// than a 404 so callers can query arbitrary music IDs safely.
 fn suite_music_status_value(root: &Value, music_id: i64, difficulty: &str) -> Value {
-    let score = flatten_nested_map_values(root, "userMusicScoreMap", "musicId")
-        .into_iter()
+    let score = music_scores(root, music_id)
         .rev()
-        .find(|entry| {
-            entry.get("musicId").and_then(Value::as_i64) == Some(music_id)
-                && entry.get("musicDifficulty").and_then(Value::as_str) == Some(difficulty)
-        });
+        .find(|entry| entry.get("musicDifficulty").and_then(Value::as_str) == Some(difficulty));
     let clear_status = score
         .as_ref()
         .and_then(|entry| entry.get("clearStatus"))
@@ -365,6 +369,24 @@ fn suite_music_status_value(root: &Value, music_id: i64, difficulty: &str) -> Va
         "soloHighScore": score.as_ref().and_then(|entry| entry.get("soloHighScore")).cloned(),
         "maxCombo": score.as_ref().and_then(|entry| entry.get("maxCombo")).cloned(),
         "soloScoreRank": score.as_ref().and_then(|entry| entry.get("soloScoreRank")).cloned(),
+    })
+}
+
+/// Select scores by their explicit music ID, falling back to the enclosing
+/// map key, without cloning every score in the user's snapshot.
+fn music_scores(root: &Value, music_id: i64) -> impl DoubleEndedIterator<Item = &Value> {
+    let maps = root
+        .get("userMusicScoreMap")
+        .and_then(|map| map.get("entries"))
+        .and_then(Value::as_array);
+    maps.into_iter().flatten().flat_map(move |map| {
+        let key = map.get("key").and_then(Value::as_i64);
+        map.get("value")
+            .and_then(|value| value.get("entries"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(move |score| score.get("musicId").and_then(Value::as_i64).or(key) == Some(music_id))
     })
 }
 
@@ -493,7 +515,7 @@ pub async fn version(State(state): State<SharedState>) -> Json<Value> {
 // ============================================================================
 
 /// Fetches and caches the normalized monthly ranking period list.
-async fn fetch_monthly_master_body(state: &SharedState) -> AppResult<String> {
+async fn fetch_monthly_master_body(state: &SharedState) -> AppResult<Bytes> {
     let cfg = jp_config(state)?;
     cached_json(
         state,
@@ -501,7 +523,7 @@ async fn fetch_monthly_master_body(state: &SharedState) -> AppResult<String> {
         state.config.cache_ttl_master_secs,
         &state.client.monthly_ranking_master_url(cfg),
         &MASTER_MONTHLY_RANKING_LIST_SCHEMA,
-        |root, _| Ok(json!({ "entries": serde_json::to_value(models::monthly_ranking_list(root))? })),
+        |root| Ok(json!({ "entries": serde_json::to_value(models::monthly_ranking_list(&root))? })),
     )
     .await
 }
@@ -521,7 +543,7 @@ pub async fn monthly_ranking_info(
         return Err(AppError::bad_request("monthlyRankingId must be >= 1"));
     }
     let body = fetch_monthly_master_body(&state).await?;
-    let root: Value = serde_json::from_str(&body)?;
+    let root: Value = serde_json::from_slice(&body)?;
     let entry = root
         .get("entries")
         .and_then(Value::as_array)
@@ -536,7 +558,7 @@ pub async fn monthly_ranking_info(
 }
 
 /// Fetches and caches the serialized monthly ranking report for a period.
-async fn fetch_monthly_body(state: &SharedState, monthly_id: i64) -> AppResult<String> {
+async fn fetch_monthly_body(state: &SharedState, monthly_id: i64) -> AppResult<Bytes> {
     let cfg = jp_config(state)?;
     if monthly_id < 1 {
         return Err(AppError::bad_request("monthlyId must be >= 1"));
@@ -548,7 +570,7 @@ async fn fetch_monthly_body(state: &SharedState, monthly_id: i64) -> AppResult<S
         state.config.cache_ttl_ranking_secs,
         &state.client.monthly_ranking_url(cfg, monthly_id),
         &USER_MONTHLY_RANKING_RANKING_RESPONSE_SCHEMA,
-        |root, _| Ok(serde_json::to_value(models::monthly_ranking_report(root))?),
+        |root| Ok(serde_json::to_value(models::monthly_ranking_report(&root))?),
     )
     .await
 }
@@ -556,7 +578,7 @@ async fn fetch_monthly_body(state: &SharedState, monthly_id: i64) -> AppResult<S
 /// Fetches the monthly ranking report as a value for sub-endpoint extraction.
 async fn fetch_monthly_ranking_value(state: &SharedState, monthly_id: i64) -> AppResult<Value> {
     let body = fetch_monthly_body(state, monthly_id).await?;
-    Ok(serde_json::from_str(&body)?)
+    Ok(serde_json::from_slice(&body)?)
 }
 
 /// GET /api/{server}/monthly-ranking/{monthly_id} — near/top/border users.
@@ -599,7 +621,7 @@ pub async fn monthly_ranking_border(
 // ============================================================================
 
 /// Fetches and caches the normalized event master list.
-async fn fetch_event_master_body(state: &SharedState) -> AppResult<String> {
+async fn fetch_event_master_body(state: &SharedState) -> AppResult<Bytes> {
     let cfg = jp_config(state)?;
     cached_json(
         state,
@@ -607,7 +629,7 @@ async fn fetch_event_master_body(state: &SharedState) -> AppResult<String> {
         state.config.cache_ttl_master_secs,
         &state.client.event_master_url(cfg),
         &MASTER_EVENT_LIST_SCHEMA,
-        |root, _| Ok(json!({ "entries": serde_json::to_value(models::event_list(root))? })),
+        |root| Ok(json!({ "entries": serde_json::to_value(models::event_list(&root))? })),
     )
     .await
 }
@@ -639,7 +661,7 @@ pub async fn event_single(State(state): State<SharedState>, Path((_server, event
 /// Fetches the event master list as a bare entries array for type resolution.
 async fn fetch_event_master_value(state: &SharedState) -> AppResult<Value> {
     let body = fetch_event_master_body(state).await?;
-    let wrapped: Value = serde_json::from_str(&body)?;
+    let wrapped: Value = serde_json::from_slice(&body)?;
     Ok(wrapped.get("entries").cloned().unwrap_or_else(|| Value::Array(Vec::new())))
 }
 
@@ -690,8 +712,8 @@ pub async fn event_ranking(
 
     let key = format!("event-ranking:{event_id}:{event_type}:{}", query.mid.unwrap_or(0));
     let url = state.client.event_ranking_url(cfg, event_id, &event_type, query.mid);
-    let body = cached_json(&state, &key, state.config.cache_ttl_ranking_secs, &url, schema, |root, _| {
-        Ok(serde_json::to_value(models::event_ranking_report(root, &event_type))?)
+    let body = cached_json(&state, &key, state.config.cache_ttl_ranking_secs, &url, schema, |root| {
+        Ok(serde_json::to_value(models::event_ranking_report(&root, &event_type))?)
     })
     .await?;
     Ok(json_response(body))
@@ -764,6 +786,87 @@ filtered_master_handlers! {
     character_costumes(character_id) => ("costume-master", costume_master_url, COSTUME_LIST_SCHEMA, "characterId", "characterId");
     /// GET /api/{server}/bands/{band_id}/characters — band members.
     band_characters(band_id) => ("character-master", character_master_url, CHARACTER_LIST_SCHEMA, "bandId", "bandId");
+}
+
+/// Card sections reuse the situation list cache and preserve upstream fields.
+async fn card_section(state: &SharedState, card_id: i64, section: &str) -> AppResult<Response> {
+    if card_id < 1 {
+        return Err(AppError::bad_request("cardId must be >= 1"));
+    }
+    let cfg = jp_config(state)?;
+    let root = master_list_value(
+        state,
+        "situation-master",
+        &state.client.situation_master_url(cfg),
+        &SITUATION_LIST_SCHEMA,
+    )
+    .await?;
+    let card = find_entry(&root, "situationId", card_id, "card")?;
+    let value = match section {
+        "levels" => json!({ "entries": card.get("levels").cloned().unwrap_or_else(|| json!([])) }),
+        "episodes" => {
+            json!({ "entries": card.get("episodes").and_then(|episodes| episodes.get("entries")).cloned().unwrap_or_else(|| json!([])) })
+        }
+        _ => card
+            .get("training")
+            .cloned()
+            .ok_or_else(|| AppError::not_found(format!("card {card_id} has no training data")))?,
+    };
+    Ok(json_response(value.to_string()))
+}
+
+pub async fn card_levels(State(state): State<SharedState>, Path((_server, card_id)): Path<(String, i64)>) -> AppResult<Response> {
+    card_section(&state, card_id, "levels").await
+}
+
+pub async fn card_episodes(State(state): State<SharedState>, Path((_server, card_id)): Path<(String, i64)>) -> AppResult<Response> {
+    card_section(&state, card_id, "episodes").await
+}
+
+pub async fn card_training(State(state): State<SharedState>, Path((_server, card_id)): Path<(String, i64)>) -> AppResult<Response> {
+    card_section(&state, card_id, "training").await
+}
+
+/// Join character membership to cards; character IDs are not assumed to be
+/// contiguous or to encode the band ID.
+pub async fn band_cards(State(state): State<SharedState>, Path((_server, band_id)): Path<(String, i64)>) -> AppResult<Response> {
+    if band_id < 1 {
+        return Err(AppError::bad_request("bandId must be >= 1"));
+    }
+    let cfg = jp_config(&state)?;
+    let characters = master_list_value(
+        &state,
+        "character-master",
+        &state.client.character_master_url(cfg),
+        &CHARACTER_LIST_SCHEMA,
+    )
+    .await?;
+    let members: HashSet<i64> = characters
+        .get("entries")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry.get("bandId").and_then(Value::as_i64) == Some(band_id))
+        .filter_map(|entry| entry.get("characterId").and_then(Value::as_i64))
+        .collect();
+    if members.is_empty() {
+        return Ok(json_response("{\"entries\":[]}"));
+    }
+    let cards = master_list_value(
+        &state,
+        "situation-master",
+        &state.client.situation_master_url(cfg),
+        &SITUATION_LIST_SCHEMA,
+    )
+    .await?;
+    Ok(json_response(
+        filtered_entries(&cards, |card| {
+            card.get("characterIndex")
+                .and_then(Value::as_i64)
+                .is_some_and(|id| members.contains(&id))
+        })
+        .to_string(),
+    ))
 }
 
 // ============================================================================
@@ -915,6 +1018,28 @@ pub async fn user_music_scores(State(state): State<SharedState>) -> AppResult<Re
     let cfg = jp_config(&state)?;
     let root = suite_user_value(&state, &format!("suite-user:{}", cfg.uid)).await?;
     let entries = flatten_nested_map_values(&root, "userMusicScoreMap", "musicId");
+    Ok(json_response(json!({ "entries": entries }).to_string()))
+}
+
+/// All recorded difficulties for one song, preserving the source order.
+pub async fn user_music_scores_single(
+    State(state): State<SharedState>,
+    Path((_server, music_id)): Path<(String, i64)>,
+) -> AppResult<Response> {
+    if music_id < 1 {
+        return Err(AppError::bad_request("musicId must be >= 1"));
+    }
+    let cfg = jp_config(&state)?;
+    let root = suite_user_value(&state, &format!("suite-user:{}", cfg.uid)).await?;
+    let entries: Vec<Value> = music_scores(&root, music_id)
+        .map(|score| {
+            let mut score = score.clone();
+            if let Some(object) = score.as_object_mut() {
+                object.entry("musicId").or_insert_with(|| json!(music_id));
+            }
+            score
+        })
+        .collect();
     Ok(json_response(json!({ "entries": entries }).to_string()))
 }
 
