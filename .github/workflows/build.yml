@@ -101,7 +101,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/asterzc19/penlight-dream-api
+          images: ghcr.io/lanyinn-labs/penlight-dream-api
           tags: |
             type=semver,pattern={{raw}}
             type=semver,pattern={{version}}

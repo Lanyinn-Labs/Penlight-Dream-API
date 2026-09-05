@@ -28,7 +28,7 @@ docker build -t penlight-dream-api .
 docker run --rm -p 8080:8080 --env-file .env penlight-dream-api
 
 # 方式三：直接拉取 GitHub Actions 打 tag 时自动构建发布的 GHCR 镜像
-docker run --rm -p 8080:8080 --env-file .env ghcr.io/asterzc19/penlight-dream-api:latest
+docker run --rm -p 8080:8080 --env-file .env ghcr.io/lanyinn-labs/penlight-dream-api:latest
 ```
 
 容器内必须把 `HOST` 设为 `0.0.0.0` 才能被宿主机访问。compose 已自动覆盖该值；用 `docker run` 时若 `.env` 里是 `HOST=127.0.0.1`，请改为 `0.0.0.0` 或用 `-e HOST=0.0.0.0` 覆盖。
