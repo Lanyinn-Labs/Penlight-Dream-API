@@ -29,16 +29,31 @@ pub fn build(state: SharedState) -> Router {
         .route("/{server}/music-difficulties", get(handlers::music_difficulty_master))
         .route("/{server}/multi-live-difficulties", get(handlers::multi_live_difficulty_master))
         .route(
+            "/{server}/multi-live-difficulties/{id}",
+            get(handlers::multi_live_difficulty_single),
+        )
+        .route(
             "/{server}/weekly-multi-live-difficulties",
             get(handlers::weekly_multi_live_difficulty_master),
         )
+        .route(
+            "/{server}/weekly-multi-live-difficulties/{id}",
+            get(handlers::weekly_multi_live_difficulty_single),
+        )
         .route("/{server}/music-shops", get(handlers::music_shop_master))
+        .route("/{server}/music-shops/{id}", get(handlers::music_shop_single))
         .route("/{server}/area-items", get(handlers::area_item_master))
+        .route("/{server}/area-items/{id}", get(handlers::area_item_single))
         .route("/{server}/area-item-spawns", get(handlers::area_item_spawn_master))
+        .route("/{server}/area-item-spawns/{id}", get(handlers::area_item_spawn_single))
         .route("/{server}/bonds", get(handlers::bonds_master))
+        .route("/{server}/bonds/{id}", get(handlers::bonds_single))
         .route("/{server}/bond-effects", get(handlers::bonds_effect_master))
+        .route("/{server}/bond-effects/{id}", get(handlers::bonds_effect_single))
         .route("/{server}/action-sets", get(handlers::action_set_master))
+        .route("/{server}/action-sets/{id}", get(handlers::action_set_single))
         .route("/{server}/degrees", get(handlers::degree_master))
+        .route("/{server}/degrees/{id}", get(handlers::degree_single))
         .route("/{server}/characters", get(handlers::character_master))
         .route("/{server}/characters/{character_id}/cards", get(handlers::character_cards))
         .route("/{server}/characters/{character_id}/costumes", get(handlers::character_costumes))

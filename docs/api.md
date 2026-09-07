@@ -57,6 +57,8 @@ curl http://127.0.0.1:8080/api/jp/music
 
 ### 主数据
 
+以下 Map 主数据也支持在列表路径后追加 `/{id}` 获取单个对象：`multi-live-difficulties`、`weekly-multi-live-difficulties`、`area-items`、`area-item-spawns`、`bonds`、`bond-effects`、`action-sets`、`music-shops`、`degrees`。标识字段分别为 `id`、`id`、`areaItemId`、`spawnPoint`、`bondsId`、`bondsEffectId`、`actionSetId`、`musicShopId`、`degreeId`。例如 `GET /api/jp/area-items/1`。`area-item-spawns` 的 ID 为字符串摆放点标识，其余 ID 必须为正整数；无效整数返回 `400`，不存在返回 `404`。详情与列表共享缓存和解码结果，不访问额外的上游详情路径。
+
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/{server}/application` | 应用版本、服务器状态、各平台维护状态 |

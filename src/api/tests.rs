@@ -233,3 +233,75 @@ async fn derived_routes_decode_encrypted_data_share_cache_and_validate_requests(
     request(&http, &app, "/api/jp/cards/1/levels", 200).await;
     assert_eq!(card_calls.load(Ordering::SeqCst), 2);
 }
+
+#[tokio::test]
+async fn map_details_share_normalized_lists_and_preserve_identifier_types() {
+    for (public, upstream_path, field) in [
+        ("multi-live-difficulties", "multilivedifficulty", "id"),
+        ("weekly-multi-live-difficulties", "weeklymultilivedifficulty", "id"),
+        ("area-items", "areaitem", "areaItemId"),
+        ("area-item-spawns", "areaitemspawn", "spawnPoint"),
+        ("bonds", "bonds", "bondsId"),
+        ("bond-effects", "bondseffect", "bondsEffectId"),
+        ("action-sets", "actionset", "actionSetId"),
+        ("music-shops", "musicshop", "musicShopId"),
+        ("degrees", "degree", "degreeId"),
+    ] {
+        let string_id = field == "spawnPoint";
+        let key = if string_id { message(1, b"cafe") } else { int(1, 7) };
+        let explicit = if string_id { message(1, b"stage") } else { int(1, 8) };
+        // One omitted ID must fall back to the key; one conflicting ID must survive.
+        let payload = encrypt(
+            [
+                message(1, &[key.clone(), message(2, &[])].concat()),
+                message(1, &[key, message(2, &explicit)].concat()),
+            ]
+            .concat(),
+        );
+        let calls = Arc::new(AtomicUsize::new(0));
+        let upstream = serve(Router::new().route(
+            &format!("/{upstream_path}"),
+            get({
+                let calls = calls.clone();
+                move || {
+                    let calls = calls.clone();
+                    let payload = payload.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                        payload
+                    }
+                }
+            }),
+        ))
+        .await;
+        let config = config(format!("{}/", upstream.url));
+        let app = serve(routes::build(Arc::new(AppState {
+            client: GarupaClient::new(&config).unwrap(),
+            config,
+            cache: Cache::new(),
+            coalescer: Coalescer::new(),
+        })))
+        .await;
+        let http = reqwest::Client::new();
+        let base = format!("/api/jp/{public}");
+        if !string_id {
+            for invalid in ["0", "-1", "abc", "9223372036854775808"] {
+                request(&http, &app, &format!("{base}/{invalid}"), 400).await;
+            }
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        }
+        let id = if string_id { "cafe" } else { "7" };
+        let detail_path = format!("{base}/{id}");
+        let (detail, list) = tokio::join!(request(&http, &app, &detail_path, 200), request(&http, &app, &base, 200),);
+        assert_eq!(detail, list["entries"][0]);
+        assert_eq!(detail[field], if string_id { json!("cafe") } else { json!(7) });
+        let explicit_id = if string_id { "stage" } else { "8" };
+        assert_eq!(
+            request(&http, &app, &format!("{base}/{explicit_id}"), 200).await,
+            list["entries"][1]
+        );
+        request(&http, &app, &format!("{base}/999"), 404).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "{public}");
+    }
+}
